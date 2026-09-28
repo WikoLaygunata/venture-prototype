@@ -27,6 +27,7 @@ import {
 } from 'lucide-vue-next'
 
 import { claimNfcToken, fetchNfcToken } from '@/lib/api'
+import { setPendingToken } from '@/lib/pendingToken'
 import { isSupabaseConfigured } from '@/lib/supabase'
 import { signUp } from '@/stores/auth'
 import { toast } from '@/stores/toast'
@@ -156,14 +157,16 @@ async function handleRegister() {
       bio: form.bio.trim(),
     })
 
-    // Bind the lanyard to the brand-new account.
-    await claimNfcToken(token.value, userId)
-
     if (needsEmailConfirmation) {
+      // No session yet, so claiming would be rejected: the lanyard gets bound
+      // on the first login instead.
+      setPendingToken(token.value)
       phase.value = 'done'
-      toast.info('Cek email kamu buat konfirmasi, lanyard-nya udah keburu diklaim ✅')
       return
     }
+
+    // Bind the lanyard to the brand-new account.
+    await claimNfcToken(token.value, userId)
 
     toast.success(`Lanyard ${token.value} aktif! Selamat datang, ${form.fullName.split(' ')[0]} 🎉`)
     router.replace({ name: 'profile' })
@@ -311,10 +314,11 @@ async function handleRegister() {
       <!-- ------------------------------------------- email confirmation state -->
       <div v-else-if="phase === 'done'" class="flex flex-col items-center gap-3 py-14 text-center">
         <CircleCheck class="h-10 w-10 text-mint" aria-hidden="true" />
-        <p class="text-base font-extrabold text-slate-700">Lanyard berhasil diklaim!</p>
+        <p class="text-base font-extrabold text-slate-700">Akun kamu sudah dibuat!</p>
         <p class="max-w-[17rem] text-xs leading-relaxed text-slate-400">
           Kami kirim link konfirmasi ke <strong>{{ form.email }}</strong>. Klik link-nya,
-          terus login buat mulai mutualan.
+          lalu login — lanyard <strong class="font-mono">{{ token }}</strong> otomatis
+          terikat ke akunmu saat itu.
         </p>
         <RouterLink :to="{ name: 'login' }" class="btn-primary mt-2">
           Ke halaman login

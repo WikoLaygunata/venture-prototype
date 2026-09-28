@@ -47,7 +47,7 @@ import StateBlock from '@/components/StateBlock.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 
 import {
-  fetchMutuals,
+  fetchMutualCount,
   fetchProfile,
   hasPendingPing,
   isMutualWith,
@@ -109,9 +109,10 @@ async function load() {
     profile.value = row
     if (isSelf.value) setProfile(row)
 
-    // Relationship context — only meaningful for a logged-in visitor.
-    const [mutuals, mutualFlag, pending] = await Promise.all([
-      fetchMutuals(row.id),
+    // Relationship context. The count comes from an RPC because the `mutuals`
+    // table itself is only readable by the two people in each row.
+    const [count, mutualFlag, pending] = await Promise.all([
+      fetchMutualCount(row.id),
       currentUserId.value && !isSelf.value
         ? isMutualWith(currentUserId.value, row.id)
         : Promise.resolve(false),
@@ -120,7 +121,7 @@ async function load() {
         : Promise.resolve(false),
     ])
 
-    mutualCount.value = mutuals.length
+    mutualCount.value = count
     alreadyMutual.value = mutualFlag
     pingPending.value = pending
   } catch (error) {

@@ -24,6 +24,16 @@ function findSpot(id) {
   return demoDb.spots.find((s) => s.id === id) ?? null
 }
 
+/**
+ * Our SQL functions raise errors shaped like `TOKEN_UNAVAILABLE: token sudah…`
+ * so logs stay greppable. Strip the machine code before showing it to a human.
+ */
+function rpcMessage(error, fallback) {
+  const raw = error?.message ?? ''
+  const stripped = raw.replace(/^[A-Z][A-Z0-9_]+:\s*/, '').trim()
+  return stripped || fallback
+}
+
 /* --------------------------------------------------------------- NFC tokens */
 
 /**
@@ -42,17 +52,29 @@ export async function fetchNfcToken(token) {
     return row ? { ...row } : null
   }
 
-  const { data, error } = await supabase
-    .from('nfc_tokens')
-    .select('id, token, status, user_id, claimed_at')
-    .eq('token', token)
-    .maybeSingle()
+  // `nfc_tokens` has no RLS policy on purpose — reading it directly would let
+  // anyone page through the table and harvest unclaimed tags. This RPC answers
+  // for one exact token only.
+  const { data, error } = await supabase.rpc('resolve_nfc_token', { p_token: token })
 
-  if (error) throw new Error(`Gagal memeriksa token NFC: ${error.message}`)
-  return data
+  if (error) throw new Error(rpcMessage(error, 'Gagal memeriksa token NFC.'))
+
+  const row = Array.isArray(data) ? data[0] : data
+  if (!row) return null
+
+  return {
+    token: String(token).trim().toUpperCase(),
+    status: row.status,
+    user_id: row.owner_id ?? null,
+  }
 }
 
-/** Binds an unclaimed token to a freshly created account. */
+/**
+ * Binds an unclaimed token to the caller's account.
+ *
+ * `userId` is only used by demo mode; against Supabase the RPC derives the owner
+ * from `auth.uid()`, so a client cannot claim a lanyard on somebody else's behalf.
+ */
 export async function claimNfcToken(token, userId) {
   if (!isSupabaseConfigured) {
     const row = demoDb.nfc_tokens.find(
@@ -60,25 +82,23 @@ export async function claimNfcToken(token, userId) {
     )
     if (!row) throw new Error('Token NFC tidak ditemukan.')
     if (row.status === 'claimed') throw new Error('Token NFC ini sudah diklaim.')
+
+    // Mirrors auth.uid() in the RPC: fall back to whoever is signed in.
+    const owner = userId ?? demoDb.session_user_id
+    if (!owner) throw new Error('Harus login dulu untuk mengklaim lanyard.')
+
     row.status = 'claimed'
-    row.user_id = userId
+    row.user_id = owner
     row.claimed_at = new Date().toISOString()
     persistDemoDb()
     return { ...row }
   }
 
-  // `.eq('status', 'unclaimed')` makes this a compare-and-set: a second scanner
-  // racing for the same tag updates 0 rows instead of stealing it.
-  const { data, error } = await supabase
-    .from('nfc_tokens')
-    .update({ status: 'claimed', user_id: userId, claimed_at: new Date().toISOString() })
-    .eq('token', token)
-    .eq('status', 'unclaimed')
-    .select()
-    .maybeSingle()
+  // The function does a compare-and-set on status='unclaimed', so two people
+  // racing for the same tag means the loser gets an error, not a stolen tag.
+  const { data, error } = await supabase.rpc('claim_nfc_token', { p_token: token })
 
-  if (error) throw new Error(`Gagal mengklaim token: ${error.message}`)
-  if (!data) throw new Error('Token NFC ini sudah diklaim orang lain.')
+  if (error) throw new Error(rpcMessage(error, 'Gagal mengklaim lanyard.'))
   return data
 }
 
@@ -116,8 +136,18 @@ export async function createProfile(profile) {
     return { ...row }
   }
 
-  const { data, error } = await supabase.from('profiles').insert(profile).select().single()
-  if (error) throw new Error(`Gagal membuat profil: ${error.message}`)
+  // Upsert, not insert: the `on_auth_user_created` trigger already created a
+  // skeleton row, so this fills in the details the signup form collected.
+  const { data, error } = await supabase
+    .from('profiles')
+    .upsert(profile, { onConflict: 'id' })
+    .select()
+    .single()
+
+  if (error) {
+    if (error.code === '23505') throw new Error('Username ini sudah dipakai.')
+    throw new Error(`Gagal membuat profil: ${error.message}`)
+  }
   return data
 }
 
@@ -138,7 +168,11 @@ export async function updateProfile(userId, patch) {
     .select()
     .single()
 
-  if (error) throw new Error(`Gagal menyimpan profil: ${error.message}`)
+  if (error) {
+    if (error.code === '23505') throw new Error('Username ini sudah dipakai.')
+    if (error.code === '23514') throw new Error('Username hanya boleh huruf, angka, titik, dan underscore (3-24 karakter).')
+    throw new Error(`Gagal menyimpan profil: ${error.message}`)
+  }
   return data
 }
 
@@ -336,7 +370,13 @@ export async function sendPing({ senderId, receiverId, message }) {
     .select()
     .single()
 
-  if (error) throw new Error(`Gagal mengirim PING: ${error.message}`)
+  if (error) {
+    // Hits the `pings_one_pending_per_pair` partial unique index.
+    if (error.code === '23505') {
+      throw new Error('Kamu udah kirim PING ke orang ini, tunggu balasannya ya.')
+    }
+    throw new Error(`Gagal mengirim PING: ${error.message}`)
+  }
   return data
 }
 
@@ -362,7 +402,15 @@ export async function hasPendingPing(senderId, receiverId) {
   return Boolean(data)
 }
 
-/** Accepting a PING promotes the pair to mutuals. */
+/**
+ * Accept or decline a PING. Accepting promotes the pair to mutuals.
+ *
+ * Against Supabase this is a single RPC call rather than an UPDATE followed by
+ * an INSERT: `pings` has no UPDATE policy and `mutuals` has no INSERT policy,
+ * so both steps happen inside `respond_to_ping()` in one transaction. That is
+ * what stops a client from accepting its own outgoing PING or fabricating a
+ * connection that has no accepted request behind it.
+ */
 export async function respondToPing(pingId, status) {
   if (!['accepted', 'declined'].includes(status)) {
     throw new Error('Status PING tidak valid.')
@@ -372,49 +420,59 @@ export async function respondToPing(pingId, status) {
     const ping = demoDb.pings.find((p) => p.id === pingId)
     if (!ping) throw new Error('PING tidak ditemukan.')
     ping.status = status
+    ping.responded_at = new Date().toISOString()
     if (status === 'accepted') {
-      await createMutual(ping.sender_id, ping.receiver_id)
+      linkMutualInDemo(ping.sender_id, ping.receiver_id)
     }
     persistDemoDb()
     await fakeDelay(200)
     return { ...ping }
   }
 
-  const { data, error } = await supabase
-    .from('pings')
-    .update({ status })
-    .eq('id', pingId)
-    .select()
-    .single()
+  const { data, error } = await supabase.rpc('respond_to_ping', {
+    p_ping_id: pingId,
+    p_status: status,
+  })
 
-  if (error) throw new Error(`Gagal memperbarui PING: ${error.message}`)
-  if (status === 'accepted') await createMutual(data.sender_id, data.receiver_id)
+  if (error) throw new Error(rpcMessage(error, 'Gagal memperbarui PING.'))
   return data
 }
 
 /* ------------------------------------------------------------------- mutuals */
 
-export async function createMutual(userAId, userBId) {
-  // Sort the pair so (a,b) and (b,a) never produce duplicate rows.
+/**
+ * Demo-mode only. In Supabase mode connections are created exclusively by the
+ * `respond_to_ping` RPC, so there is no client-side insert path.
+ */
+function linkMutualInDemo(userAId, userBId) {
+  // Sort the pair so (a,b) and (b,a) never produce duplicate rows — the same
+  // invariant the `mutuals_ordered_pair` check enforces in Postgres.
   const [a, b] = [userAId, userBId].sort()
 
+  if (demoDb.mutuals.some((m) => m.user_a_id === a && m.user_b_id === b)) return null
+
+  const row = { id: demoId('m'), user_a_id: a, user_b_id: b, created_at: new Date().toISOString() }
+  demoDb.mutuals.push(row)
+  return row
+}
+
+/**
+ * Connection count for any profile.
+ *
+ * `mutuals` rows are only visible to the two people in them, so a visitor
+ * cannot count somebody else's connections by querying the table. The
+ * `count_mutuals` function exposes just the number.
+ */
+export async function fetchMutualCount(userId) {
+  if (!userId) return 0
+
   if (!isSupabaseConfigured) {
-    const exists = demoDb.mutuals.some((m) => m.user_a_id === a && m.user_b_id === b)
-    if (exists) return null
-    const row = { id: demoId('m'), user_a_id: a, user_b_id: b, created_at: new Date().toISOString() }
-    demoDb.mutuals.push(row)
-    persistDemoDb()
-    return { ...row }
+    return demoDb.mutuals.filter((m) => m.user_a_id === userId || m.user_b_id === userId).length
   }
 
-  const { data, error } = await supabase
-    .from('mutuals')
-    .upsert({ user_a_id: a, user_b_id: b }, { onConflict: 'user_a_id,user_b_id' })
-    .select()
-    .maybeSingle()
-
-  if (error) throw new Error(`Gagal membuat mutualan: ${error.message}`)
-  return data
+  const { data, error } = await supabase.rpc('count_mutuals', { p_user_id: userId })
+  if (error) return 0
+  return Number(data) || 0
 }
 
 export async function fetchMutuals(userId) {

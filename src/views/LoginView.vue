@@ -20,6 +20,7 @@ import {
 
 import { isSupabaseConfigured } from '@/lib/supabase'
 import { DEMO_CREDENTIALS } from '@/lib/mockData'
+import { claimPendingToken } from '@/lib/pendingToken'
 import { signIn, signUp } from '@/stores/auth'
 import { toast } from '@/stores/toast'
 
@@ -102,6 +103,14 @@ async function handleSubmit() {
     } else {
       await signIn({ email: form.email.trim(), password: form.password })
       toast.success('Berhasil masuk. Selamat datang kembali!')
+    }
+
+    // Finish a lanyard claim that was deferred because signup had no session yet.
+    const pending = await claimPendingToken()
+    if (pending?.ok) {
+      toast.success(`Lanyard ${pending.token} sekarang terikat ke akunmu 🎉`)
+    } else if (pending) {
+      toast.error(`Lanyard ${pending.token} gagal diklaim: ${pending.error}`)
     }
 
     router.replace(redirectTo.value ?? { name: 'map' })
