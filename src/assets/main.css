@@ -1,0 +1,69 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #app {
+    height: 100%;
+  }
+
+  body {
+    @apply font-sans antialiased text-slate-800;
+    /* Prevent the whole page from bouncing; scrolling happens inside the mobile frame */
+    overscroll-behavior-y: none;
+  }
+
+  /* Hide scrollbars inside the mobile frame so it feels native */
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@layer components {
+  /* The scrollable body of a screen inside the mobile frame */
+  .screen-scroll {
+    @apply flex-1 overflow-y-auto overflow-x-hidden no-scrollbar;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3
+      text-sm font-semibold transition active:scale-[0.97]
+      disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply btn bg-kenalan-500 text-white shadow-lg shadow-kenalan-500/30
+      hover:bg-kenalan-600;
+  }
+
+  .btn-secondary {
+    @apply btn bg-kenalan-100 text-kenalan-700 hover:bg-kenalan-200;
+  }
+
+  .btn-ghost {
+    @apply btn border border-slate-200 bg-white text-slate-600 hover:bg-slate-50;
+  }
+
+  .input-field {
+    @apply w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3
+      text-sm text-slate-800 placeholder-slate-400 outline-none transition
+      focus:border-kenalan-400 focus:bg-white focus:ring-4 focus:ring-kenalan-100
+      disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400;
+  }
+
+  .field-label {
+    @apply mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500;
+  }
+
+  .card {
+    @apply rounded-3xl border border-slate-100 bg-white p-4 shadow-card;
+  }
+}
