@@ -8,7 +8,7 @@ import { isLoggedIn } from '@/stores/auth'
     <span class="text-5xl" aria-hidden="true">🧭</span>
     <h1 class="text-xl font-extrabold tracking-tight text-slate-800">Halaman nggak ketemu</h1>
     <p class="max-w-[17rem] text-sm leading-relaxed text-slate-400">
-      Link-nya mungkin salah, atau lanyard yang kamu scan belum terdaftar di Kenalan.
+      Link-nya mungkin salah, atau keychain NFC yang kamu scan belum terdaftar di Kenalan.
     </p>
 
     <div class="mt-2 w-full max-w-[16rem] space-y-2">
@@ -21,7 +21,7 @@ import { isLoggedIn } from '@/stores/auth'
         Balik ke awal
       </RouterLink>
       <RouterLink :to="{ name: 'activate' }" class="btn-ghost w-full">
-        Aktifkan lanyard
+        Aktifkan keychain
       </RouterLink>
     </div>
   </div>

@@ -43,12 +43,18 @@ watch(() => route.fullPath, refreshBadge)
 </script>
 
 <template>
-  <div class="min-h-screen bg-slate-900 flex justify-center items-center p-0 sm:p-4">
+  <div class="h-[100dvh] bg-slate-900 flex justify-center items-center p-0 sm:p-4 overflow-hidden">
     <div
-      class="w-full max-w-md bg-white min-h-[100dvh] sm:min-h-[844px] sm:h-[844px] sm:rounded-[40px] shadow-2xl relative flex flex-col overflow-hidden border-4 border-slate-800"
+      class="w-full max-w-md bg-white h-[100dvh] sm:h-[844px] sm:max-h-[100dvh] sm:rounded-[40px] shadow-2xl relative flex flex-col overflow-hidden border-0 sm:border-4 border-slate-800"
     >
       <ToastHost />
 
+      <!--
+        The frame is a fixed-height flex column. Each view renders its own
+        AppHeader (pinned top) and BottomNav sits here (pinned bottom); only the
+        view's `.screen-scroll` region scrolls between them, so header + nav
+        stay put like a native app.
+      -->
       <RouterView v-slot="{ Component }">
         <!-- key forces a clean remount between /profile and /user/:id -->
         <component :is="Component" :key="route.fullPath" class="flex-1 min-h-0" />

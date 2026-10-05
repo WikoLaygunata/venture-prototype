@@ -3,14 +3,18 @@
  *
  * Used automatically whenever Supabase env vars are missing, so the prototype
  * is fully clickable offline. Mutations are persisted to localStorage, which
- * means claiming an NFC token / sending a PING / dropping a stamp survives a
+ * means claiming an NFC keychain / sending a PING / dropping a stamp survives a
  * page reload — handy when demoing the flow.
  *
  * Shapes here mirror the SQL schema documented in `src/lib/supabase.js`.
  */
 import { hoursAgo, minutesAgo } from './time'
 
-const STORAGE_KEY = 'kenalan.demo.v3'
+// Bumped to v4: profiles gained is_discoverable, stamps dropped spot_id in
+// favour of location_label + image_url + distance_m, and stamp_replies / blocks
+// / reports are new. The seed-merge in load() keeps older snapshots from
+// breaking, but a reset is cleaner if you were on v3.
+const STORAGE_KEY = 'kenalan.demo.v6'
 
 /** Credentials that "work" in demo mode. */
 export const DEMO_CREDENTIALS = {
@@ -18,10 +22,16 @@ export const DEMO_CREDENTIALS = {
   password: 'kenalan123',
 }
 
+/** Max simultaneous outgoing PINGs still awaiting a reply (anti-spam). */
+export const MAX_PENDING_PINGS = 5
+
 const avatar = (seed) =>
   `https://api.dicebear.com/9.x/notionists-neutral/svg?seed=${encodeURIComponent(
     seed,
   )}&backgroundColor=ddd6fe,fce7f3,d1fae5,fef3c7&radius=50`
+
+// Placeholder stamp photos (picsum = stable seeded images, no API key needed).
+const photo = (seed) => `https://picsum.photos/seed/${encodeURIComponent(seed)}/640/420`
 
 function seed() {
   return {
@@ -40,6 +50,17 @@ function seed() {
         instagram: 'rakaprtm',
         linkedin: 'raka-pratama',
         spotify: 'rakaprtm',
+        whatsapp: '081234567890',
+        line: 'rakaprtm',
+        social_visibility: {
+          instagram: 'public',
+          linkedin: 'public',
+          spotify: 'public',
+          whatsapp: 'mutual',
+          line: 'mutual',
+        },
+        is_discoverable: true,
+        stamp_history_public: true,
         created_at: hoursAgo(900),
       },
       {
@@ -56,6 +77,17 @@ function seed() {
         instagram: 'nadiakirana',
         linkedin: 'nadia-kirana',
         spotify: 'nadiakirana',
+        whatsapp: '081200001111',
+        line: '',
+        social_visibility: {
+          instagram: 'public',
+          linkedin: 'mutual',
+          spotify: 'public',
+          whatsapp: 'mutual',
+          line: 'off',
+        },
+        is_discoverable: true,
+        stamp_history_public: true,
         created_at: hoursAgo(800),
       },
       {
@@ -72,6 +104,17 @@ function seed() {
         instagram: 'ayrasls',
         linkedin: 'ayra-salsabila',
         spotify: '',
+        whatsapp: '',
+        line: 'ayrasls',
+        social_visibility: {
+          instagram: 'public',
+          linkedin: 'public',
+          spotify: 'public',
+          whatsapp: 'off',
+          line: 'public',
+        },
+        is_discoverable: true,
+        stamp_history_public: false,
         created_at: hoursAgo(700),
       },
       {
@@ -88,6 +131,18 @@ function seed() {
         instagram: 'bimoard',
         linkedin: '',
         spotify: 'bimoard',
+        whatsapp: '081355557777',
+        line: 'bimoard',
+        social_visibility: {
+          instagram: 'public',
+          linkedin: 'public',
+          spotify: 'mutual',
+          whatsapp: 'mutual',
+          line: 'mutual',
+        },
+        // Opted out of the Explore recommendation list.
+        is_discoverable: false,
+        stamp_history_public: false,
         created_at: hoursAgo(1200),
       },
       {
@@ -104,6 +159,17 @@ function seed() {
         instagram: 'gitamaharani',
         linkedin: 'gita-maharani',
         spotify: 'gitamaharani',
+        whatsapp: '',
+        line: 'gitamaharani',
+        social_visibility: {
+          instagram: 'public',
+          linkedin: 'public',
+          spotify: 'public',
+          whatsapp: 'off',
+          line: 'mutual',
+        },
+        is_discoverable: true,
+        stamp_history_public: true,
         created_at: hoursAgo(600),
       },
       {
@@ -120,12 +186,23 @@ function seed() {
         instagram: 'farrelngr',
         linkedin: 'farrel-nugroho',
         spotify: '',
+        whatsapp: '081988887777',
+        line: 'farrelngr',
+        social_visibility: {
+          instagram: 'public',
+          linkedin: 'public',
+          spotify: 'off',
+          whatsapp: 'public',
+          line: 'public',
+        },
+        is_discoverable: true,
+        stamp_history_public: false,
         created_at: hoursAgo(300),
       },
     ],
 
     /**
-     * NFC lanyard tokens.
+     * NFC keychain tokens.
      * - KNL-NEW-01 / KNL-NEW-02 are still unclaimed -> test the onboarding flow
      * - the rest are bound to a profile -> test the auto-redirect flow
      */
@@ -155,65 +232,140 @@ function seed() {
       },
     ],
 
-    spots: [
-      { id: 's-perpus', name: 'Perpustakaan Pusat', emoji: '📚', category: 'Belajar', x: 26, y: 24 },
-      { id: 's-kantin', name: 'Kantin LT 1', emoji: '🍜', category: 'Makan', x: 68, y: 38 },
-      { id: 's-sc', name: 'Student Center', emoji: '🎪', category: 'Nongkrong', x: 44, y: 58 },
-      { id: 's-coffee', name: 'Coffee Corner', emoji: '☕', category: 'Ngopi', x: 76, y: 70 },
-      { id: 's-gor', name: 'GOR Kampus', emoji: '🏀', category: 'Olahraga', x: 18, y: 72 },
-      { id: 's-taman', name: 'Taman Fakultas', emoji: '🌳', category: 'Santai', x: 54, y: 16 },
-    ],
-
+    /**
+     * Location Stamps are now a lightweight forum: each stamp is a thread, and
+     * people reply to it (see stamp_replies). The physical place is NOT named;
+     * only a free-text `location_label` the author chose plus a precomputed
+     * `distance_m` from the viewer. `image_url` is optional.
+     */
     location_stamps: [
       {
         id: 'st-1',
         user_id: 'u-nadia',
-        spot_id: 's-kantin',
-        message: 'Lagi di Kantin LT 1, nyari temen ngopi. Meja deket jendela ya!',
+        location_label: 'Deket area kantin',
+        distance_m: 40,
+        bearing_deg: 35,
+        message: 'Nyari temen ngopi sore ini, lagi santai aja. Meja deket jendela ya!',
+        image_url: photo('coffee-table'),
         created_at: minutesAgo(18),
       },
       {
         id: 'st-2',
         user_id: 'u-farrel',
-        spot_id: 's-perpus',
-        message: 'Nugas ML di lantai 3 perpus. Butuh second opinion soal dataset.',
+        location_label: 'Gedung sebelah barat, lantai atas',
+        distance_m: 180,
+        bearing_deg: 270,
+        message: 'Nugas ML, butuh second opinion soal dataset. Boleh mampir diskusi.',
+        image_url: photo('laptop-dataset'),
         created_at: hoursAgo(2),
       },
       {
         id: 'st-3',
         user_id: 'u-gita',
-        spot_id: 's-sc',
-        message: 'Nunggu jadwal kosong di SC. Open buat ngobrol random sampe jam 4.',
+        location_label: 'Area terbuka tengah kampus',
+        distance_m: 95,
+        bearing_deg: 150,
+        message: 'Lagi nunggu jadwal kosong. Open buat ngobrol random sampe jam 4.',
+        image_url: '',
         created_at: hoursAgo(4),
       },
       {
         id: 'st-4',
         user_id: 'u-ayra',
-        spot_id: 's-coffee',
-        message: 'Matcha latte-nya lagi promo. Ada yang mau nemenin brainstorming brand?',
+        location_label: 'Kedai kopi dekat gerbang',
+        distance_m: 520,
+        bearing_deg: 310,
+        message: 'Matcha-nya lagi promo. Ada yang mau nemenin brainstorming brand?',
+        image_url: photo('matcha-latte'),
         created_at: hoursAgo(7),
       },
       {
         id: 'st-5',
         user_id: 'u-bimo',
-        spot_id: 's-gor',
+        location_label: 'Lapangan olahraga',
+        distance_m: 1200,
+        bearing_deg: 205,
         message: 'Futsal sore, masih kurang 2 orang. Gabung aja langsung.',
+        image_url: '',
         created_at: hoursAgo(11),
-      },
-      {
-        id: 'st-6',
-        user_id: 'u-nadia',
-        spot_id: 's-taman',
-        message: 'Sketching di taman fakultas, tenang banget di sini.',
-        created_at: hoursAgo(21),
       },
       {
         /* already older than 24h — proves the feed really filters */
         id: 'st-old',
         user_id: 'u-gita',
-        spot_id: 's-perpus',
+        location_label: 'Perpus lama',
+        distance_m: 60,
+        bearing_deg: 90,
         message: 'Stamp lama yang seharusnya nggak muncul di feed.',
+        image_url: '',
         created_at: hoursAgo(30),
+      },
+      /* --- u-raka (demo account) history: expired but < 30 days old, so the
+         live feed hides them but Stamp History (bagian 30 hari) shows them. --- */
+      {
+        id: 'st-h1',
+        user_id: 'u-raka',
+        location_label: 'Perpus lantai 3',
+        distance_m: 0,
+        bearing_deg: 0,
+        message: 'Nugas bareng yuk, aku bawa cemilan.',
+        image_url: photo('study-session'),
+        created_at: hoursAgo(28),
+      },
+      {
+        id: 'st-h2',
+        user_id: 'u-raka',
+        location_label: 'Coffee corner',
+        distance_m: 0,
+        bearing_deg: 0,
+        message: 'Ngopi sore sambil review desain, mampir aja.',
+        image_url: '',
+        created_at: hoursAgo(26 + 2 * 24),
+      },
+      {
+        id: 'st-h3',
+        user_id: 'u-raka',
+        location_label: 'Student center',
+        distance_m: 0,
+        bearing_deg: 0,
+        message: 'Rapat kecil komunitas, open buat yang penasaran.',
+        image_url: photo('community-meetup'),
+        created_at: hoursAgo(10 * 24),
+      },
+      {
+        id: 'st-h4',
+        user_id: 'u-raka',
+        location_label: 'Taman fakultas',
+        distance_m: 0,
+        bearing_deg: 0,
+        message: 'Sketsa pagi sebelum kelas. Produktif dikit.',
+        image_url: '',
+        created_at: hoursAgo(22 * 24),
+      },
+    ],
+
+    /** Replies turn each stamp into a thread/forum post. */
+    stamp_replies: [
+      {
+        id: 'sr-1',
+        stamp_id: 'st-1',
+        user_id: 'u-gita',
+        message: 'Aku ke sana 10 menit lagi ya, lagi dari kelas.',
+        created_at: minutesAgo(12),
+      },
+      {
+        id: 'sr-2',
+        stamp_id: 'st-1',
+        user_id: 'u-farrel',
+        message: 'Pesenin es kopi dong kalau sempat 🙏',
+        created_at: minutesAgo(6),
+      },
+      {
+        id: 'sr-3',
+        stamp_id: 'st-2',
+        user_id: 'u-ayra',
+        message: 'Dataset-nya soal apa? Aku ada waktu abis ini.',
+        created_at: hoursAgo(1),
       },
     ],
 
@@ -230,7 +382,7 @@ function seed() {
         id: 'p-2',
         sender_id: 'u-farrel',
         receiver_id: 'u-raka',
-        message: 'Bang, liat lanyard kamu di perpus. Bahas side project bareng dong.',
+        message: 'Bang, liat keychain NFC kamu di perpus. Bahas side project bareng dong.',
         status: 'pending',
         created_at: hoursAgo(9),
       },
@@ -248,6 +400,12 @@ function seed() {
       { id: 'm-1', user_a_id: 'u-raka', user_b_id: 'u-nadia', created_at: hoursAgo(48) },
       { id: 'm-2', user_a_id: 'u-raka', user_b_id: 'u-bimo', created_at: hoursAgo(120) },
     ],
+
+    /** Who the current user has blocked. blocker_id blocked blocked_id. */
+    blocks: [],
+
+    /** Abuse reports (demo keeps them local; a real backend would queue them). */
+    reports: [],
 
     /** Demo auth: which profile is "logged in". null = guest. */
     session_user_id: null,
@@ -292,4 +450,14 @@ export function demoId(prefix) {
 /** Mimics network latency so loading states are visible while prototyping. */
 export function fakeDelay(ms = 260) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/** A believable random distance for a freshly dropped stamp (metres). */
+export function randomDistance() {
+  return Math.floor(20 + Math.random() * 900)
+}
+
+/** Random compass bearing (0..359°) for a freshly dropped stamp. */
+export function randomBearing() {
+  return Math.floor(Math.random() * 360)
 }

@@ -1,13 +1,13 @@
 <script setup>
 /**
- * OnboardingView — SCENARIO 1: somebody tapped a Kenalan lanyard.
+ * OnboardingView — SCENARIO 1: somebody tapped a Kenalan NFC keychain.
  *
  * URL: /activate?token=XYZ
  *
  * The token decides the whole screen:
- *   no token          -> ask them to type the code printed on the lanyard
+ *   no token          -> ask them to type the code printed on the keychain
  *   token not found   -> invalid tag state
- *   status 'claimed'  -> auto-redirect to /user/:user_id (that lanyard has an owner)
+ *   status 'claimed'  -> auto-redirect to /user/:user_id (that keychain has an owner)
  *   status 'unclaimed'-> registration form with the token prefilled + disabled
  */
 import { computed, onMounted, reactive, ref, watch } from 'vue'
@@ -82,7 +82,7 @@ async function checkToken() {
     tokenRecord.value = record
 
     if (record.status === 'claimed') {
-      // The lanyard already belongs to someone: send the scanner to their profile.
+      // The keychain already belongs to someone: send the scanner to their profile.
       phase.value = 'claimed'
       if (record.user_id) {
         // Small pause so the scanner sees what happened instead of a blank flash.
@@ -158,17 +158,17 @@ async function handleRegister() {
     })
 
     if (needsEmailConfirmation) {
-      // No session yet, so claiming would be rejected: the lanyard gets bound
+      // No session yet, so claiming would be rejected: the keychain gets bound
       // on the first login instead.
       setPendingToken(token.value)
       phase.value = 'done'
       return
     }
 
-    // Bind the lanyard to the brand-new account.
+    // Bind the keychain to the brand-new account.
     await claimNfcToken(token.value, userId)
 
-    toast.success(`Lanyard ${token.value} aktif! Selamat datang, ${form.fullName.split(' ')[0]} 🎉`)
+    toast.success(`Keychain ${token.value} aktif! Selamat datang, ${form.fullName.split(' ')[0]} 🎉`)
     router.replace({ name: 'profile' })
   } catch (error) {
     formError.value = error.message
@@ -186,14 +186,14 @@ async function handleRegister() {
     >
       <div class="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] opacity-80">
         <Nfc class="h-4 w-4" aria-hidden="true" />
-        Kenalan Lanyard
+        Kenalan Keychain
       </div>
       <h1 class="mt-2 text-2xl font-extrabold leading-tight">
         {{
           phase === 'ready'
-            ? 'Aktifkan lanyard kamu'
+            ? 'Aktifkan keychain kamu'
             : phase === 'claimed'
-              ? 'Lanyard ini sudah punya pemilik'
+              ? 'Keychain ini sudah punya pemilik'
               : 'Scan terdeteksi'
         }}
       </h1>
@@ -234,7 +234,7 @@ async function handleRegister() {
         <span class="text-4xl" aria-hidden="true">👋</span>
         <p class="text-sm font-bold text-slate-700">Token ini sudah diklaim</p>
         <p class="max-w-[17rem] text-xs leading-relaxed text-slate-400">
-          Mengalihkan kamu ke profil pemilik lanyard…
+          Mengalihkan kamu ke profil pemilik keychain…
         </p>
         <LoaderCircle class="mt-1 h-5 w-5 animate-spin text-kenalan-400" aria-hidden="true" />
         <RouterLink
@@ -252,13 +252,13 @@ async function handleRegister() {
         <div class="rounded-3xl border border-kenalan-100 bg-kenalan-50/60 p-4">
           <p class="text-sm font-bold text-kenalan-700">Nggak ada token terdeteksi</p>
           <p class="mt-1 text-xs leading-relaxed text-kenalan-700/70">
-            Tempelkan HP ke lanyard, atau masukkan kode yang tercetak di belakang kartu.
+            Tempelkan HP ke keychain, atau masukkan kode yang tercetak di keychain.
           </p>
         </div>
 
         <form class="space-y-3" @submit.prevent="submitManualToken">
           <div>
-            <label for="manual-token" class="field-label">Kode lanyard</label>
+            <label for="manual-token" class="field-label">Kode keychain</label>
             <input
               id="manual-token"
               v-model="manualToken"
@@ -301,7 +301,7 @@ async function handleRegister() {
           <p class="max-w-[17rem] text-xs leading-relaxed text-blush-deep/75">
             {{
               lookupError ||
-              `Token "${token}" nggak ada di database Kenalan. Pastikan kamu scan lanyard resmi.`
+              `Token "${token}" nggak ada di database Kenalan. Pastikan kamu scan keychain resmi.`
             }}
           </p>
         </div>
@@ -317,7 +317,7 @@ async function handleRegister() {
         <p class="text-base font-extrabold text-slate-700">Akun kamu sudah dibuat!</p>
         <p class="max-w-[17rem] text-xs leading-relaxed text-slate-400">
           Kami kirim link konfirmasi ke <strong>{{ form.email }}</strong>. Klik link-nya,
-          lalu login — lanyard <strong class="font-mono">{{ token }}</strong> otomatis
+          lalu login — keychain <strong class="font-mono">{{ token }}</strong> otomatis
           terikat ke akunmu saat itu.
         </p>
         <RouterLink :to="{ name: 'login' }" class="btn-primary mt-2">
@@ -333,7 +333,7 @@ async function handleRegister() {
         >
           <CircleCheck class="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
           <p class="text-xs font-semibold leading-relaxed">
-            Token valid dan belum diklaim. Isi data di bawah buat mengikat lanyard ini ke akunmu.
+            Token valid dan belum diklaim. Isi data di bawah buat mengikat keychain ini ke akunmu.
           </p>
         </div>
 
@@ -497,7 +497,7 @@ async function handleRegister() {
         </button>
 
         <p class="pb-2 text-center text-[11px] leading-relaxed text-slate-400">
-          Dengan lanjut, kamu setuju lanyard <strong class="font-mono">{{ token }}</strong> terikat
+          Dengan lanjut, kamu setuju keychain <strong class="font-mono">{{ token }}</strong> terikat
           permanen ke akun ini.
         </p>
       </form>

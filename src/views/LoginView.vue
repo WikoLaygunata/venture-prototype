@@ -105,12 +105,12 @@ async function handleSubmit() {
       toast.success('Berhasil masuk. Selamat datang kembali!')
     }
 
-    // Finish a lanyard claim that was deferred because signup had no session yet.
+    // Finish a keychain claim that was deferred because signup had no session yet.
     const pending = await claimPendingToken()
     if (pending?.ok) {
-      toast.success(`Lanyard ${pending.token} sekarang terikat ke akunmu 🎉`)
+      toast.success(`Keychain ${pending.token} sekarang terikat ke akunmu 🎉`)
     } else if (pending) {
-      toast.error(`Lanyard ${pending.token} gagal diklaim: ${pending.error}`)
+      toast.error(`Keychain ${pending.token} gagal diklaim: ${pending.error}`)
     }
 
     router.replace(redirectTo.value ?? { name: 'map' })
@@ -146,7 +146,7 @@ async function fillDemo() {
         <p class="mt-1.5 text-sm leading-relaxed text-slate-500">
           {{
             isRegister
-              ? 'Daftar dulu, lanyard bisa kamu kaitkan kapan aja.'
+              ? 'Daftar dulu, keychain NFC bisa kamu kaitkan kapan aja.'
               : 'Masuk buat lanjut mutualan dan lihat stamp di sekitarmu.'
           }}
         </p>
@@ -331,7 +331,7 @@ async function fillDemo() {
         <div class="mt-6 border-t border-slate-100 pt-5">
           <RouterLink :to="{ name: 'activate' }" class="btn-ghost w-full !py-3">
             <Nfc class="h-4 w-4" aria-hidden="true" />
-            Punya lanyard baru? Aktifkan di sini
+            Punya keychain NFC baru? Aktifkan di sini
           </RouterLink>
         </div>
       </template>

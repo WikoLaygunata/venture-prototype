@@ -8,20 +8,37 @@
  * Views only ever import from here, so swapping the backend never touches UI code.
  */
 import { supabase, isSupabaseConfigured } from './supabase'
-import { demoDb, persistDemoDb, demoId, fakeDelay } from './mockData'
-import { isoSince, isFresh } from './time'
+import {
+  demoDb,
+  persistDemoDb,
+  demoId,
+  fakeDelay,
+  randomDistance,
+  MAX_PENDING_PINGS,
+} from './mockData'
+import { isoSince, isFresh, isWithin, STAMP_HISTORY_MS } from './time'
 import { DEFAULT_COLOR_CODE } from './colorCodes'
+import { defaultSocialVisibility } from './socials'
+
+export { MAX_PENDING_PINGS }
 
 /* ------------------------------------------------------------------ helpers */
 
 const byNewest = (a, b) => new Date(b.created_at) - new Date(a.created_at)
+const byOldest = (a, b) => new Date(a.created_at) - new Date(b.created_at)
 
 function findProfile(id) {
   return demoDb.profiles.find((p) => p.id === id) ?? null
 }
 
-function findSpot(id) {
-  return demoDb.spots.find((s) => s.id === id) ?? null
+/** Ids the given user has blocked, or who have blocked them (demo mode). */
+function blockedIdsFor(userId) {
+  const set = new Set()
+  for (const b of demoDb.blocks) {
+    if (b.blocker_id === userId) set.add(b.blocked_id)
+    if (b.blocked_id === userId) set.add(b.blocker_id)
+  }
+  return set
 }
 
 /**
@@ -37,9 +54,9 @@ function rpcMessage(error, fallback) {
 /* --------------------------------------------------------------- NFC tokens */
 
 /**
- * Looks up a lanyard token.
+ * Looks up an NFC keychain token.
  * @returns {Promise<{token:string,status:'unclaimed'|'claimed',user_id:string|null}|null>}
- *          null when the token does not exist at all (invalid/fake tag).
+ *          null when the token does not exist at all (invalid/fake keychain).
  */
 export async function fetchNfcToken(token) {
   if (!token) return null
@@ -73,7 +90,7 @@ export async function fetchNfcToken(token) {
  * Binds an unclaimed token to the caller's account.
  *
  * `userId` is only used by demo mode; against Supabase the RPC derives the owner
- * from `auth.uid()`, so a client cannot claim a lanyard on somebody else's behalf.
+ * from `auth.uid()`, so a client cannot claim a keychain on someone else's behalf.
  */
 export async function claimNfcToken(token, userId) {
   if (!isSupabaseConfigured) {
@@ -81,11 +98,11 @@ export async function claimNfcToken(token, userId) {
       (t) => t.token.toLowerCase() === String(token).toLowerCase(),
     )
     if (!row) throw new Error('Token NFC tidak ditemukan.')
-    if (row.status === 'claimed') throw new Error('Token NFC ini sudah diklaim.')
+    if (row.status === 'claimed') throw new Error('Keychain NFC ini sudah diklaim.')
 
     // Mirrors auth.uid() in the RPC: fall back to whoever is signed in.
     const owner = userId ?? demoDb.session_user_id
-    if (!owner) throw new Error('Harus login dulu untuk mengklaim lanyard.')
+    if (!owner) throw new Error('Harus login dulu untuk mengklaim keychain.')
 
     row.status = 'claimed'
     row.user_id = owner
@@ -98,7 +115,7 @@ export async function claimNfcToken(token, userId) {
   // racing for the same tag means the loser gets an error, not a stolen tag.
   const { data, error } = await supabase.rpc('claim_nfc_token', { p_token: token })
 
-  if (error) throw new Error(rpcMessage(error, 'Gagal mengklaim lanyard.'))
+  if (error) throw new Error(rpcMessage(error, 'Gagal mengklaim keychain.'))
   return data
 }
 
@@ -128,6 +145,11 @@ export async function createProfile(profile) {
     const row = {
       color_code: DEFAULT_COLOR_CODE,
       interests: [],
+      is_discoverable: true,
+      stamp_history_public: false,
+      whatsapp: '',
+      line: '',
+      social_visibility: defaultSocialVisibility(),
       created_at: new Date().toISOString(),
       ...profile,
     }
@@ -181,13 +203,36 @@ export function updateColorCode(userId, colorCode) {
   return updateProfile(userId, { color_code: colorCode })
 }
 
-/** People you have not connected with yet — powers the "Rekomendasi" list. */
-export async function fetchSuggestedProfiles(userId, limit = 6) {
+/** Toggle whether this profile appears in other people's Explore list. */
+export function setDiscoverable(userId, isDiscoverable) {
+  return updateProfile(userId, { is_discoverable: isDiscoverable })
+}
+
+/** Toggle whether this profile's 30-day stamp history is visible to others. */
+export function setStampHistoryPublic(userId, isPublic) {
+  return updateProfile(userId, { stamp_history_public: isPublic })
+}
+
+/**
+ * Recommended people to mutualan with — powers the Explore tab.
+ *
+ * Only returns profiles that opted in (`is_discoverable`), are not already a
+ * mutual, and are not blocked in either direction.
+ */
+export async function fetchRecommendedProfiles(userId, limit = 12) {
   if (!isSupabaseConfigured) {
     await fakeDelay()
     const connected = new Set((await fetchMutuals(userId)).map((p) => p.id))
+    const blocked = blockedIdsFor(userId)
     return demoDb.profiles
-      .filter((p) => p.id !== userId && !connected.has(p.id))
+      .filter(
+        (p) =>
+          p.id !== userId &&
+          p.is_discoverable !== false &&
+          !connected.has(p.id) &&
+          !blocked.has(p.id),
+      )
+      .sort(byNewest)
       .slice(0, limit)
       .map((p) => ({ ...p }))
   }
@@ -198,6 +243,7 @@ export async function fetchSuggestedProfiles(userId, limit = 6) {
   const { data, error } = await supabase
     .from('profiles')
     .select('*')
+    .eq('is_discoverable', true)
     .not('id', 'in', `(${excluded.join(',')})`)
     .limit(limit)
 
@@ -205,23 +251,21 @@ export async function fetchSuggestedProfiles(userId, limit = 6) {
   return data ?? []
 }
 
-/* --------------------------------------------------------------------- spots */
-
-export async function fetchSpots() {
-  if (!isSupabaseConfigured) {
-    await fakeDelay(160)
-    return demoDb.spots.map((s) => ({ ...s }))
-  }
-
-  const { data, error } = await supabase.from('spots').select('*').order('name')
-  if (error) throw new Error(`Gagal memuat spot: ${error.message}`)
-  return data ?? []
-}
-
 /* ----------------------------------------------------------- location stamps */
 
+/** Attach author + live reply count to a demo stamp row. */
+function decorateStamp(s) {
+  return {
+    ...s,
+    profile: findProfile(s.user_id),
+    reply_count: demoDb.stamp_replies.filter((r) => r.stamp_id === s.id).length,
+  }
+}
+
 /**
- * Stamps dropped in the last 24 hours, newest first, joined with author + spot.
+ * Stamps dropped in the last 24 hours, newest first, with author + reply count.
+ * The physical place is never exposed — only the author's `location_label` and
+ * a `distance_m` from the viewer.
  */
 export async function fetchRecentStamps() {
   if (!isSupabaseConfigured) {
@@ -229,24 +273,74 @@ export async function fetchRecentStamps() {
     return demoDb.location_stamps
       .filter((s) => isFresh(s.created_at))
       .sort(byNewest)
-      .map((s) => ({
-        ...s,
-        profile: findProfile(s.user_id),
-        spot: findSpot(s.spot_id),
-      }))
+      .map(decorateStamp)
   }
 
   const { data, error } = await supabase
     .from('location_stamps')
-    .select('*, profile:profiles(*), spot:spots(*)')
+    .select('*, profile:profiles(*), reply_count:stamp_replies(count)')
     .gte('created_at', isoSince())
     .order('created_at', { ascending: false })
 
   if (error) throw new Error(`Gagal memuat stamp: ${error.message}`)
-  return data ?? []
+
+  // PostgREST returns the aggregate as `[{ count }]`; flatten it.
+  return (data ?? []).map((s) => ({
+    ...s,
+    reply_count: Array.isArray(s.reply_count) ? (s.reply_count[0]?.count ?? 0) : s.reply_count,
+  }))
 }
 
-export async function createStamp({ userId, spotId, message }) {
+export async function fetchStamp(stampId) {
+  if (!stampId) return null
+
+  if (!isSupabaseConfigured) {
+    await fakeDelay(160)
+    const found = demoDb.location_stamps.find((s) => s.id === stampId)
+    return found ? decorateStamp(found) : null
+  }
+
+  const { data, error } = await supabase
+    .from('location_stamps')
+    .select('*, profile:profiles(*)')
+    .eq('id', stampId)
+    .maybeSingle()
+
+  if (error) throw new Error(`Gagal memuat stamp: ${error.message}`)
+  return data
+}
+
+/**
+ * The caller's own stamps from the last 30 days — powers Stamp History.
+ * Unlike the live feed this includes expired stamps (anything < 30 days old).
+ */
+export async function fetchStampHistory(userId, windowMs = STAMP_HISTORY_MS) {
+  if (!userId) return []
+
+  if (!isSupabaseConfigured) {
+    await fakeDelay()
+    return demoDb.location_stamps
+      .filter((s) => s.user_id === userId && isWithin(s.created_at, windowMs))
+      .sort(byNewest)
+      .map(decorateStamp)
+  }
+
+  const since = new Date(Date.now() - windowMs).toISOString()
+  const { data, error } = await supabase
+    .from('location_stamps')
+    .select('*, profile:profiles(*), reply_count:stamp_replies(count)')
+    .eq('user_id', userId)
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+
+  if (error) throw new Error(`Gagal memuat history stamp: ${error.message}`)
+  return (data ?? []).map((s) => ({
+    ...s,
+    reply_count: Array.isArray(s.reply_count) ? (s.reply_count[0]?.count ?? 0) : s.reply_count,
+  }))
+}
+
+export async function createStamp({ userId, message, locationLabel = '', imageUrl = '', distanceM = 0 }) {
   const now = new Date()
   const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000)
 
@@ -254,7 +348,10 @@ export async function createStamp({ userId, spotId, message }) {
     const row = {
       id: demoId('st'),
       user_id: userId,
-      spot_id: spotId,
+      location_label: locationLabel,
+      image_url: imageUrl,
+      distance_m: 0, // it's your own stamp -> zero distance from you
+      bearing_deg: 0,
       message,
       created_at: now.toISOString(),
       expires_at: expiresAt.toISOString(),
@@ -262,35 +359,37 @@ export async function createStamp({ userId, spotId, message }) {
     demoDb.location_stamps.unshift(row)
     persistDemoDb()
     await fakeDelay(220)
-    return { ...row, profile: findProfile(userId), spot: findSpot(spotId) }
+    return decorateStamp(row)
   }
 
   const { data, error } = await supabase
     .from('location_stamps')
     .insert({
       user_id: userId,
-      spot_id: spotId,
       message,
+      location_label: locationLabel,
+      image_url: imageUrl || null,
+      distance_m: distanceM,
       expires_at: expiresAt.toISOString(),
     })
-    .select('*, profile:profiles(*), spot:spots(*)')
+    .select('*, profile:profiles(*)')
     .single()
 
   if (error) throw new Error(`Gagal membuat stamp: ${error.message}`)
-  return data
+  return { ...data, reply_count: 0 }
 }
 
 export async function deleteStamp(stampId, userId) {
   if (!isSupabaseConfigured) {
-    const index = demoDb.location_stamps.findIndex(
-      (s) => s.id === stampId && s.user_id === userId,
+    demoDb.location_stamps = demoDb.location_stamps.filter(
+      (s) => !(s.id === stampId && s.user_id === userId),
     )
-    if (index !== -1) demoDb.location_stamps.splice(index, 1)
+    // Replies die with their thread.
+    demoDb.stamp_replies = demoDb.stamp_replies.filter((r) => r.stamp_id !== stampId)
     persistDemoDb()
     return true
   }
 
-  // user_id in the filter keeps this honest even if RLS is misconfigured.
   const { error } = await supabase
     .from('location_stamps')
     .delete()
@@ -301,13 +400,65 @@ export async function deleteStamp(stampId, userId) {
   return true
 }
 
+/* ------------------------------------------------------ stamp replies (thread) */
+
+export async function fetchStampReplies(stampId) {
+  if (!stampId) return []
+
+  if (!isSupabaseConfigured) {
+    await fakeDelay(160)
+    return demoDb.stamp_replies
+      .filter((r) => r.stamp_id === stampId)
+      .sort(byOldest)
+      .map((r) => ({ ...r, profile: findProfile(r.user_id) }))
+  }
+
+  const { data, error } = await supabase
+    .from('stamp_replies')
+    .select('*, profile:profiles(*)')
+    .eq('stamp_id', stampId)
+    .order('created_at', { ascending: true })
+
+  if (error) throw new Error(`Gagal memuat balasan: ${error.message}`)
+  return data ?? []
+}
+
+export async function createStampReply({ stampId, userId, message }) {
+  const trimmed = String(message).trim()
+  if (!trimmed) throw new Error('Balasan tidak boleh kosong.')
+
+  if (!isSupabaseConfigured) {
+    const row = {
+      id: demoId('sr'),
+      stamp_id: stampId,
+      user_id: userId,
+      message: trimmed,
+      created_at: new Date().toISOString(),
+    }
+    demoDb.stamp_replies.push(row)
+    persistDemoDb()
+    await fakeDelay(200)
+    return { ...row, profile: findProfile(userId) }
+  }
+
+  const { data, error } = await supabase
+    .from('stamp_replies')
+    .insert({ stamp_id: stampId, user_id: userId, message: trimmed })
+    .select('*, profile:profiles(*)')
+    .single()
+
+  if (error) throw new Error(`Gagal mengirim balasan: ${error.message}`)
+  return data
+}
+
 /* --------------------------------------------------------------------- pings */
 
 export async function fetchIncomingPings(userId) {
   if (!isSupabaseConfigured) {
     await fakeDelay()
+    const blocked = blockedIdsFor(userId)
     return demoDb.pings
-      .filter((p) => p.receiver_id === userId)
+      .filter((p) => p.receiver_id === userId && !blocked.has(p.sender_id))
       .sort(byNewest)
       .map((p) => ({ ...p, sender: findProfile(p.sender_id) }))
   }
@@ -341,13 +492,42 @@ export async function fetchSentPings(userId) {
   return data ?? []
 }
 
+/** How many outgoing PINGs are still waiting for a reply. */
+export async function countPendingSentPings(userId) {
+  if (!userId) return 0
+
+  if (!isSupabaseConfigured) {
+    return demoDb.pings.filter((p) => p.sender_id === userId && p.status === 'pending').length
+  }
+
+  const { count, error } = await supabase
+    .from('pings')
+    .select('id', { count: 'exact', head: true })
+    .eq('sender_id', userId)
+    .eq('status', 'pending')
+
+  if (error) return 0
+  return count ?? 0
+}
+
 export async function sendPing({ senderId, receiverId, message }) {
   if (senderId === receiverId) throw new Error('Nggak bisa PING diri sendiri 😅')
 
   if (!isSupabaseConfigured) {
-    const existing = demoDb.pings.find(
-      (p) => p.sender_id === senderId && p.receiver_id === receiverId && p.status === 'pending',
+    if (blockedIdsFor(senderId).has(receiverId)) {
+      throw new Error('Kamu nggak bisa kirim PING ke orang ini.')
+    }
+
+    const pending = demoDb.pings.filter(
+      (p) => p.sender_id === senderId && p.status === 'pending',
     )
+    if (pending.length >= MAX_PENDING_PINGS) {
+      throw new Error(
+        `Batas PING tercapai (maks ${MAX_PENDING_PINGS} yang belum dibalas). Tunggu balasan dulu ya.`,
+      )
+    }
+
+    const existing = pending.find((p) => p.receiver_id === receiverId)
     if (existing) throw new Error('Kamu udah kirim PING ke orang ini, tunggu balasannya ya.')
 
     const row = {
@@ -364,6 +544,15 @@ export async function sendPing({ senderId, receiverId, message }) {
     return { ...row }
   }
 
+  // Enforce the client-side ceiling too; the DB has the final say via the
+  // `pings_pending_quota` trigger (migration 03).
+  const pendingCount = await countPendingSentPings(senderId)
+  if (pendingCount >= MAX_PENDING_PINGS) {
+    throw new Error(
+      `Batas PING tercapai (maks ${MAX_PENDING_PINGS} yang belum dibalas). Tunggu balasan dulu ya.`,
+    )
+  }
+
   const { data, error } = await supabase
     .from('pings')
     .insert({ sender_id: senderId, receiver_id: receiverId, message, status: 'pending' })
@@ -371,11 +560,10 @@ export async function sendPing({ senderId, receiverId, message }) {
     .single()
 
   if (error) {
-    // Hits the `pings_one_pending_per_pair` partial unique index.
     if (error.code === '23505') {
       throw new Error('Kamu udah kirim PING ke orang ini, tunggu balasannya ya.')
     }
-    throw new Error(`Gagal mengirim PING: ${error.message}`)
+    throw new Error(rpcMessage(error, `Gagal mengirim PING: ${error.message}`))
   }
   return data
 }
@@ -407,9 +595,7 @@ export async function hasPendingPing(senderId, receiverId) {
  *
  * Against Supabase this is a single RPC call rather than an UPDATE followed by
  * an INSERT: `pings` has no UPDATE policy and `mutuals` has no INSERT policy,
- * so both steps happen inside `respond_to_ping()` in one transaction. That is
- * what stops a client from accepting its own outgoing PING or fabricating a
- * connection that has no accepted request behind it.
+ * so both steps happen inside `respond_to_ping()` in one transaction.
  */
 export async function respondToPing(pingId, status) {
   if (!['accepted', 'declined'].includes(status)) {
@@ -438,6 +624,106 @@ export async function respondToPing(pingId, status) {
   return data
 }
 
+/* ----------------------------------------------------------- block & report */
+
+export async function blockUser(blockerId, blockedId) {
+  if (!blockerId || !blockedId || blockerId === blockedId) return false
+
+  if (!isSupabaseConfigured) {
+    if (!demoDb.blocks.some((b) => b.blocker_id === blockerId && b.blocked_id === blockedId)) {
+      demoDb.blocks.push({
+        id: demoId('bl'),
+        blocker_id: blockerId,
+        blocked_id: blockedId,
+        created_at: new Date().toISOString(),
+      })
+    }
+    // Blocking cancels any pending PINGs between the two, either direction.
+    demoDb.pings = demoDb.pings.filter(
+      (p) =>
+        !(
+          p.status === 'pending' &&
+          ((p.sender_id === blockerId && p.receiver_id === blockedId) ||
+            (p.sender_id === blockedId && p.receiver_id === blockerId))
+        ),
+    )
+    persistDemoDb()
+    await fakeDelay(180)
+    return true
+  }
+
+  const { error } = await supabase
+    .from('blocks')
+    .upsert(
+      { blocker_id: blockerId, blocked_id: blockedId },
+      { onConflict: 'blocker_id,blocked_id' },
+    )
+
+  if (error) throw new Error(`Gagal memblokir: ${error.message}`)
+  return true
+}
+
+export async function unblockUser(blockerId, blockedId) {
+  if (!isSupabaseConfigured) {
+    demoDb.blocks = demoDb.blocks.filter(
+      (b) => !(b.blocker_id === blockerId && b.blocked_id === blockedId),
+    )
+    persistDemoDb()
+    return true
+  }
+
+  const { error } = await supabase
+    .from('blocks')
+    .delete()
+    .eq('blocker_id', blockerId)
+    .eq('blocked_id', blockedId)
+
+  if (error) throw new Error(`Gagal membuka blokir: ${error.message}`)
+  return true
+}
+
+export async function isBlocked(blockerId, blockedId) {
+  if (!blockerId || !blockedId) return false
+
+  if (!isSupabaseConfigured) {
+    return demoDb.blocks.some((b) => b.blocker_id === blockerId && b.blocked_id === blockedId)
+  }
+
+  const { data, error } = await supabase
+    .from('blocks')
+    .select('id')
+    .eq('blocker_id', blockerId)
+    .eq('blocked_id', blockedId)
+    .maybeSingle()
+
+  if (error) return false
+  return Boolean(data)
+}
+
+export async function reportUser({ reporterId, reportedId, reason }) {
+  if (!reporterId || !reportedId) throw new Error('Data laporan tidak lengkap.')
+
+  if (!isSupabaseConfigured) {
+    demoDb.reports.push({
+      id: demoId('rp'),
+      reporter_id: reporterId,
+      reported_id: reportedId,
+      reason: String(reason ?? '').trim(),
+      created_at: new Date().toISOString(),
+    })
+    persistDemoDb()
+    await fakeDelay(200)
+    return true
+  }
+
+  const { error } = await supabase
+    .from('reports')
+    .insert({ reporter_id: reporterId, reported_id: reportedId, reason: String(reason ?? '').trim() })
+
+  if (error) throw new Error(`Gagal mengirim laporan: ${error.message}`)
+  return true
+}
+
 /* ------------------------------------------------------------------- mutuals */
 
 /**
@@ -445,23 +731,16 @@ export async function respondToPing(pingId, status) {
  * `respond_to_ping` RPC, so there is no client-side insert path.
  */
 function linkMutualInDemo(userAId, userBId) {
-  // Sort the pair so (a,b) and (b,a) never produce duplicate rows — the same
-  // invariant the `mutuals_ordered_pair` check enforces in Postgres.
   const [a, b] = [userAId, userBId].sort()
-
   if (demoDb.mutuals.some((m) => m.user_a_id === a && m.user_b_id === b)) return null
-
   const row = { id: demoId('m'), user_a_id: a, user_b_id: b, created_at: new Date().toISOString() }
   demoDb.mutuals.push(row)
   return row
 }
 
 /**
- * Connection count for any profile.
- *
- * `mutuals` rows are only visible to the two people in them, so a visitor
- * cannot count somebody else's connections by querying the table. The
- * `count_mutuals` function exposes just the number.
+ * Connection count for any profile. `mutuals` rows are only visible to the two
+ * people in them, so this goes through the `count_mutuals` RPC.
  */
 export async function fetchMutualCount(userId) {
   if (!userId) return 0
@@ -525,4 +804,26 @@ export async function isMutualWith(userId, otherId) {
 
   if (error) return false
   return Boolean(data)
+}
+
+/** End a mutual connection. Either side may do this (mutuals RLS allows delete). */
+export async function removeMutual(userId, otherId) {
+  if (!userId || !otherId) return false
+  const [a, b] = [userId, otherId].sort()
+
+  if (!isSupabaseConfigured) {
+    demoDb.mutuals = demoDb.mutuals.filter((m) => !(m.user_a_id === a && m.user_b_id === b))
+    persistDemoDb()
+    await fakeDelay(180)
+    return true
+  }
+
+  const { error } = await supabase
+    .from('mutuals')
+    .delete()
+    .eq('user_a_id', a)
+    .eq('user_b_id', b)
+
+  if (error) throw new Error(`Gagal memutuskan mutual: ${error.message}`)
+  return true
 }

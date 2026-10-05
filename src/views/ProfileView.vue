@@ -2,40 +2,41 @@
 /**
  * ProfileView — serves both `/profile` (own) and `/user/:user_id` (scanned).
  *
- * It resolves one of three viewer modes and the whole screen follows from that:
+ * Three viewer modes drive the whole screen:
  *
  *  SCENARIO 3 — mode 'self'
- *    You scanned your own lanyard. Banner "Ini Profil Kamu", tappable color-code
- *    badge, and a shortcut to the edit dashboard.
+ *    You scanned your own keychain. Banner "Ini Profil Kamu", tappable
+ *    color-code badge, discovery toggle, and a shortcut to the edit dashboard.
  *
  *  SCENARIO 2a — mode 'visitor'
- *    You are logged in and looking at somebody else. Full public profile plus
- *    the two active CTAs: "Mutualan / Send PING!" and the Icebreaker generator.
+ *    Logged in, looking at someone else. Full public profile + "Mutualan / Send
+ *    PING!" and an overflow menu to block/report.
  *
  *  SCENARIO 2b — mode 'guest'
- *    Not logged in. Profile is still fully visible (view profile first), with a
- *    sticky floating banner at the bottom. Tapping Mutualan/PING sends them to
- *    /login?redirect=/user/:user_id so they come straight back here.
+ *    Not logged in. Profile stays fully visible, with a sticky banner that
+ *    routes to /login?redirect=/user/:id so they return here after auth.
  */
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowRight,
+  Ban,
   CheckCheck,
-  Copy,
+  Flag,
   GraduationCap,
   Heart,
+  HeartCrack,
+  History,
   LoaderCircle,
   LogOut,
+  MoreVertical,
   Nfc,
   Pencil,
   RefreshCw,
   Send,
   Settings,
   Share2,
-  Sparkles,
   UserRound,
-  WandSparkles,
 } from 'lucide-vue-next'
 
 import AppHeader from '@/components/AppHeader.vue'
@@ -47,15 +48,19 @@ import StateBlock from '@/components/StateBlock.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 
 import {
+  blockUser,
   fetchMutualCount,
   fetchProfile,
   hasPendingPing,
   isMutualWith,
+  removeMutual,
+  reportUser,
   sendPing,
+  setDiscoverable,
+  setStampHistoryPublic,
   updateColorCode,
 } from '@/lib/api'
 import { getColorCode } from '@/lib/colorCodes'
-import { generateIcebreaker } from '@/lib/icebreakers'
 import { isSupabaseConfigured } from '@/lib/supabase'
 import { currentProfile, currentUserId, refreshProfile, setProfile, signOut } from '@/stores/auth'
 import { toast } from '@/stores/toast'
@@ -109,8 +114,6 @@ async function load() {
     profile.value = row
     if (isSelf.value) setProfile(row)
 
-    // Relationship context. The count comes from an RPC because the `mutuals`
-    // table itself is only readable by the two people in each row.
     const [count, mutualFlag, pending] = await Promise.all([
       fetchMutualCount(row.id),
       currentUserId.value && !isSelf.value
@@ -131,20 +134,13 @@ async function load() {
   }
 }
 
-watch(
-  [targetId, currentUserId],
-  () => {
-    load()
-  },
-  { immediate: true },
-)
+watch([targetId, currentUserId], () => load(), { immediate: true })
 
 const status = computed(() => getColorCode(profile.value?.color_code))
 const firstName = computed(() => (profile.value?.full_name || '').split(' ')[0] || 'dia')
 
 /* --------------------------------------------------- guest -> login handoff */
 
-/** Where a guest should be returned to after authenticating. */
 function goToLogin() {
   const redirect = route.params.user_id
     ? `/user/${route.params.user_id}`
@@ -175,11 +171,55 @@ async function saveColor() {
     profile.value = updated
     setProfile(updated)
     statusSheetOpen.value = false
-    toast.success(`Status kamu sekarang ${getColorCode(updated.color_code).title} ${getColorCode(updated.color_code).emoji}`)
+    toast.success(
+      `Status kamu sekarang ${getColorCode(updated.color_code).title} ${getColorCode(updated.color_code).emoji}`,
+    )
   } catch (error) {
     toast.error(error.message)
   } finally {
     savingColor.value = false
+  }
+}
+
+/* ------------------------------------------------- discovery toggle (self) */
+
+const togglingDiscovery = ref(false)
+
+async function toggleDiscovery() {
+  if (!profile.value) return
+  togglingDiscovery.value = true
+  try {
+    const next = !(profile.value.is_discoverable !== false)
+    const updated = await setDiscoverable(profile.value.id, next)
+    profile.value = updated
+    setProfile(updated)
+    toast.success(
+      next ? 'Kamu sekarang muncul di rekomendasi ✨' : 'Kamu disembunyikan dari rekomendasi.',
+    )
+  } catch (error) {
+    toast.error(error.message)
+  } finally {
+    togglingDiscovery.value = false
+  }
+}
+
+const togglingHistory = ref(false)
+
+async function toggleHistoryPublic() {
+  if (!profile.value) return
+  togglingHistory.value = true
+  try {
+    const next = profile.value.stamp_history_public !== true
+    const updated = await setStampHistoryPublic(profile.value.id, next)
+    profile.value = updated
+    setProfile(updated)
+    toast.success(
+      next ? 'History stamp kamu sekarang publik 👀' : 'History stamp kamu kembali privat.',
+    )
+  } catch (error) {
+    toast.error(error.message)
+  } finally {
+    togglingHistory.value = false
   }
 }
 
@@ -190,11 +230,8 @@ const pingMessage = ref('')
 const sendingPing = ref(false)
 
 function startPing() {
-  if (mode.value === 'guest') {
-    goToLogin()
-    return
-  }
-  pingMessage.value = icebreaker.value || ''
+  if (mode.value === 'guest') return goToLogin()
+  pingMessage.value = ''
   pingSheetOpen.value = true
 }
 
@@ -204,11 +241,7 @@ async function submitPing() {
 
   sendingPing.value = true
   try {
-    await sendPing({
-      senderId: currentUserId.value,
-      receiverId: profile.value.id,
-      message,
-    })
+    await sendPing({ senderId: currentUserId.value, receiverId: profile.value.id, message })
     pingPending.value = true
     pingSheetOpen.value = false
     pingMessage.value = ''
@@ -220,27 +253,76 @@ async function submitPing() {
   }
 }
 
-/* ------------------------------------------------- Icebreaker prompt generator */
+/* ---------------------------------------------------------- block & report */
 
-const icebreaker = ref('')
-const copied = ref(false)
+const moreOpen = ref(false)
+const reportSheetOpen = ref(false)
+const reportReason = ref('')
+const submittingReport = ref(false)
+const blocking = ref(false)
 
-function rollIcebreaker() {
-  if (mode.value === 'guest') {
-    goToLogin()
-    return
+const REPORT_REASONS = [
+  'Spam atau promosi',
+  'Pelecehan atau kata kasar',
+  'Profil palsu / impersonasi',
+  'Konten tidak pantas',
+  'Lainnya',
+]
+
+async function confirmBlock() {
+  if (!profile.value) return
+  blocking.value = true
+  try {
+    await blockUser(currentUserId.value, profile.value.id)
+    moreOpen.value = false
+    toast.info(`${firstName.value} diblokir. Kalian nggak akan saling muncul lagi.`)
+    router.replace({ name: 'map' })
+  } catch (error) {
+    toast.error(error.message)
+  } finally {
+    blocking.value = false
   }
-  icebreaker.value = generateIcebreaker(profile.value ?? {}, icebreaker.value)
-  copied.value = false
 }
 
-async function copyIcebreaker() {
+function openReport() {
+  moreOpen.value = false
+  reportReason.value = ''
+  reportSheetOpen.value = true
+}
+
+const unmutualing = ref(false)
+
+async function confirmUnmutual() {
+  if (!profile.value) return
+  unmutualing.value = true
   try {
-    await navigator.clipboard.writeText(icebreaker.value)
-    copied.value = true
-    setTimeout(() => (copied.value = false), 1800)
-  } catch {
-    toast.info('Clipboard diblokir browser. Salin manual ya.')
+    await removeMutual(currentUserId.value, profile.value.id)
+    alreadyMutual.value = false
+    mutualCount.value = Math.max(0, mutualCount.value - 1)
+    moreOpen.value = false
+    toast.info(`Mutual dengan ${firstName.value} diputuskan.`)
+  } catch (error) {
+    toast.error(error.message)
+  } finally {
+    unmutualing.value = false
+  }
+}
+
+async function submitReport() {
+  if (!profile.value || !reportReason.value) return
+  submittingReport.value = true
+  try {
+    await reportUser({
+      reporterId: currentUserId.value,
+      reportedId: profile.value.id,
+      reason: reportReason.value,
+    })
+    reportSheetOpen.value = false
+    toast.success('Laporan terkirim. Terima kasih sudah menjaga komunitas 🙏')
+  } catch (error) {
+    toast.error(error.message)
+  } finally {
+    submittingReport.value = false
   }
 }
 
@@ -276,12 +358,13 @@ async function handleSignOut() {
 }
 
 async function handleRefresh() {
+  settingsOpen.value = false
   await Promise.all([load(), isSelf.value ? refreshProfile() : Promise.resolve()])
 }
 </script>
 
 <template>
-  <div class="relative flex h-full flex-col bg-slate-50">
+  <div class="flex h-full flex-col bg-slate-50">
     <AppHeader
       :title="isSelf ? 'Profil Kamu' : (profile?.full_name || 'Profil')"
       :subtitle="isSelf ? `@${currentProfile?.username ?? ''}` : profile ? `@${profile.username}` : ''"
@@ -306,16 +389,20 @@ async function handleRefresh() {
         >
           <Settings class="h-[18px] w-[18px]" aria-hidden="true" />
         </button>
+        <button
+          v-else-if="mode === 'visitor'"
+          type="button"
+          class="rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+          aria-label="Opsi lainnya"
+          @click="moreOpen = true"
+        >
+          <MoreVertical class="h-[18px] w-[18px]" aria-hidden="true" />
+        </button>
       </template>
     </AppHeader>
 
-    <div class="screen-scroll" :class="mode === 'guest' ? 'pb-40' : 'pb-24'">
-      <StateBlock
-        :loading="loading"
-        :error="loadError"
-        loading-text="Memuat profil…"
-        @retry="load"
-      >
+    <div class="screen-scroll">
+      <StateBlock :loading="loading" :error="loadError" loading-text="Memuat profil…" @retry="load">
         <template v-if="profile">
           <!-- ============================================== profile hero -->
           <div class="relative overflow-hidden bg-white pb-5">
@@ -341,16 +428,10 @@ async function handleRefresh() {
                   <GraduationCap class="h-3.5 w-3.5" aria-hidden="true" />
                   {{ profile.major }}
                 </span>
-                <span
-                  v-if="profile.faculty"
-                  class="rounded-full bg-slate-100 px-2.5 py-1 font-semibold"
-                >
+                <span v-if="profile.faculty" class="rounded-full bg-slate-100 px-2.5 py-1 font-semibold">
                   {{ profile.faculty }}
                 </span>
-                <span
-                  v-if="profile.batch"
-                  class="rounded-full bg-slate-100 px-2.5 py-1 font-semibold"
-                >
+                <span v-if="profile.batch" class="rounded-full bg-slate-100 px-2.5 py-1 font-semibold">
                   Angkatan {{ profile.batch }}
                 </span>
               </div>
@@ -370,9 +451,7 @@ async function handleRefresh() {
                   :pulse="profile.color_code === 'red'"
                   @click="openStatusSheet"
                 />
-                <p class="mt-2 text-xs leading-relaxed text-slate-400">
-                  {{ status.description }}
-                </p>
+                <p class="mt-2 text-xs leading-relaxed text-slate-400">{{ status.description }}</p>
               </div>
 
               <div class="mt-4 flex items-center gap-4 text-xs">
@@ -392,16 +471,14 @@ async function handleRefresh() {
             <div
               class="flex items-start gap-3 rounded-3xl border border-kenalan-100 bg-gradient-to-br from-kenalan-50 to-fuchsia-50 p-4"
             >
-              <div
-                class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-kenalan-500 text-white"
-              >
+              <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-kenalan-500 text-white">
                 <Nfc class="h-4 w-4" aria-hidden="true" />
               </div>
               <div class="min-w-0">
                 <p class="text-sm font-extrabold text-kenalan-700">Ini Profil Kamu</p>
                 <p class="mt-0.5 text-xs leading-relaxed text-kenalan-700/70">
-                  Ini yang dilihat orang lain saat scan lanyard kamu. Ubah status warna biar
-                  sinyal sosialmu selalu akurat.
+                  Ini yang dilihat orang lain saat scan keychain NFC kamu. Ubah status warna
+                  biar sinyal sosialmu selalu akurat.
                 </p>
               </div>
             </div>
@@ -413,11 +490,7 @@ async function handleRefresh() {
 
             <div class="grid grid-cols-2 gap-3">
               <button type="button" class="btn-ghost !py-3" @click="openStatusSheet">
-                <span
-                  class="h-2.5 w-2.5 rounded-full"
-                  :class="status.dot"
-                  aria-hidden="true"
-                />
+                <span class="h-2.5 w-2.5 rounded-full" :class="status.dot" aria-hidden="true" />
                 Ganti status
               </button>
               <RouterLink :to="{ name: 'mutualan' }" class="btn-ghost !py-3">
@@ -425,6 +498,63 @@ async function handleRefresh() {
                 Mutualan
               </RouterLink>
             </div>
+
+            <!-- discovery toggle -->
+            <div class="flex items-center gap-3 rounded-3xl border border-slate-100 bg-white p-4 shadow-card">
+              <div class="min-w-0 flex-1">
+                <p class="text-sm font-bold text-slate-800">Muncul di rekomendasi</p>
+                <p class="mt-0.5 text-[11px] leading-relaxed text-slate-400">
+                  Kalau aktif, profilmu bisa muncul di tab Explore orang lain.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                :aria-checked="profile.is_discoverable !== false"
+                class="relative h-7 w-12 shrink-0 rounded-full transition disabled:opacity-50"
+                :class="profile.is_discoverable !== false ? 'bg-kenalan-500' : 'bg-slate-300'"
+                :disabled="togglingDiscovery"
+                @click="toggleDiscovery"
+              >
+                <span
+                  class="absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all"
+                  :class="profile.is_discoverable !== false ? 'left-6' : 'left-1'"
+                  aria-hidden="true"
+                />
+              </button>
+            </div>
+
+            
+
+            <!-- history visibility toggle -->
+            <div class="flex items-center gap-3 rounded-3xl border border-slate-100 bg-white p-4 shadow-card">
+              <div class="min-w-0 flex-1">
+                <p class="text-sm font-bold text-slate-800">History stamp publik</p>
+                <p class="mt-0.5 text-[11px] leading-relaxed text-slate-400">
+                  Kalau aktif, orang lain bisa lihat history stamp 30 harimu dari profilmu.
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                :aria-checked="profile.stamp_history_public === true"
+                class="relative h-7 w-12 shrink-0 rounded-full transition disabled:opacity-50"
+                :class="profile.stamp_history_public === true ? 'bg-kenalan-500' : 'bg-slate-300'"
+                :disabled="togglingHistory"
+                @click="toggleHistoryPublic"
+              >
+                <span
+                  class="absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all"
+                  :class="profile.stamp_history_public === true ? 'left-6' : 'left-1'"
+                  aria-hidden="true"
+                />
+              </button>
+            </div>
+            <!-- stamp history shortcut -->
+            <RouterLink :to="{ name: 'stamp-history' }" class="btn-ghost w-full !justify-start !py-3.5">
+              <History class="h-4 w-4" aria-hidden="true" />
+              History Stamp
+            </RouterLink>
           </div>
 
           <!-- ============================ SCENARIO 2a — logged-in visitor -->
@@ -437,12 +567,7 @@ async function handleRefresh() {
               <p class="text-xs font-bold">Kamu dan {{ firstName }} udah mutualan 🎉</p>
             </div>
 
-            <button
-              type="button"
-              class="btn-primary w-full !py-3.5"
-              :disabled="pingPending"
-              @click="startPing"
-            >
+            <button type="button" class="btn-primary w-full !py-3.5" :disabled="pingPending" @click="startPing">
               <Send class="h-4 w-4" aria-hidden="true" />
               {{
                 pingPending
@@ -453,57 +578,14 @@ async function handleRefresh() {
               }}
             </button>
 
-            <!-- Icebreaker Prompt Generator -->
-            <section class="card">
-              <header class="flex items-center gap-2">
-                <div
-                  class="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-kenalan-400 to-fuchsia-400 text-white"
-                >
-                  <WandSparkles class="h-4 w-4" aria-hidden="true" />
-                </div>
-                <div class="min-w-0 flex-1">
-                  <h3 class="text-sm font-extrabold text-slate-800">Icebreaker Prompt</h3>
-                  <p class="text-[11px] text-slate-400">
-                    Bingung mau bilang apa? Biar kami yang mulai.
-                  </p>
-                </div>
-              </header>
-
-              <p
-                v-if="icebreaker"
-                class="mt-3 rounded-2xl bg-kenalan-50 p-3.5 text-sm italic leading-relaxed text-kenalan-800"
-              >
-                “{{ icebreaker }}”
-              </p>
-
-              <div class="mt-3 flex gap-2">
-                <button type="button" class="btn-secondary flex-1 !py-2.5 !text-xs" @click="rollIcebreaker">
-                  <RefreshCw class="h-3.5 w-3.5" aria-hidden="true" />
-                  {{ icebreaker ? 'Acak lagi' : 'Buatkan pembuka' }}
-                </button>
-                <button
-                  v-if="icebreaker"
-                  type="button"
-                  class="btn-ghost !py-2.5 !text-xs"
-                  @click="copyIcebreaker"
-                >
-                  <CheckCheck v-if="copied" class="h-3.5 w-3.5 text-mint-deep" aria-hidden="true" />
-                  <Copy v-else class="h-3.5 w-3.5" aria-hidden="true" />
-                  {{ copied ? 'Tersalin' : 'Salin' }}
-                </button>
-              </div>
-
-              <button
-                v-if="icebreaker"
-                type="button"
-                class="btn-primary mt-2 w-full !py-2.5 !text-xs"
-                :disabled="pingPending"
-                @click="startPing"
-              >
-                <Sparkles class="h-3.5 w-3.5" aria-hidden="true" />
-                Pakai ini buat PING
-              </button>
-            </section>
+            <RouterLink
+              v-if="profile.stamp_history_public === true"
+              :to="{ name: 'stamp-history', params: { user_id: profile.id } }"
+              class="btn-ghost w-full !py-3"
+            >
+              <History class="h-4 w-4" aria-hidden="true" />
+              Lihat history stamp {{ firstName }}
+            </RouterLink>
           </div>
 
           <!-- ========================================= SCENARIO 2b — guest -->
@@ -525,10 +607,13 @@ async function handleRefresh() {
             <h3 class="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-400">
               Sosial media
             </h3>
-            <SocialLinks :profile="profile" />
+            <SocialLinks :profile="profile" :is-self="isSelf" :is-mutual="alreadyMutual" />
           </div>
 
-          <div v-if="!isSupabaseConfigured" class="px-5 pt-5">
+          <!-- spacer so content clears the guest banner / bottom edge -->
+          <div class="h-6" :class="mode === 'guest' ? 'pb-40' : ''" />
+
+          <div v-if="!isSupabaseConfigured" class="px-5 pb-6">
             <p class="rounded-2xl bg-slate-100 px-4 py-3 text-[11px] leading-relaxed text-slate-400">
               Demo mode aktif — data profil ini berasal dari mock lokal.
             </p>
@@ -540,17 +625,12 @@ async function handleRefresh() {
     <!-- ====================================== guest sticky floating banner -->
     <div
       v-if="mode === 'guest' && profile"
-      class="absolute inset-x-0 bottom-0 z-30 px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)]"
+      class="shrink-0 border-t border-slate-100 bg-white px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]"
     >
-      <div
-        class="rounded-3xl bg-gradient-to-br from-kenalan-600 to-fuchsia-500 p-4 shadow-2xl shadow-kenalan-900/30 animate-slide-up"
-      >
-        <p class="text-sm font-extrabold leading-snug text-white">
-          Suka dengan profil ini?
-        </p>
+      <div class="rounded-3xl bg-gradient-to-br from-kenalan-600 to-fuchsia-500 p-4 shadow-lg">
+        <p class="text-sm font-extrabold leading-snug text-white">Suka dengan profil ini?</p>
         <p class="mt-1 text-xs leading-relaxed text-white/80">
-          Login atau buat akun Kenalan buat mutualan &amp; kirim PING ke
-          {{ firstName }}!
+          Login atau buat akun Kenalan buat mutualan &amp; kirim PING ke {{ firstName }}!
         </p>
         <div class="mt-3 flex gap-2">
           <button
@@ -578,7 +658,7 @@ async function handleRefresh() {
       :open="statusSheetOpen"
       :busy="savingColor"
       title="Ubah Status Warna"
-      subtitle="Sinyal ini tampil di lanyard dan profil kamu."
+      subtitle="Sinyal ini tampil di keychain dan profil kamu."
       @close="statusSheetOpen = false"
     >
       <ColorCodePicker v-model="pendingColor" :busy="savingColor" />
@@ -611,20 +691,10 @@ async function handleRefresh() {
         rows="4"
         maxlength="220"
         data-autofocus
-        placeholder="Halo! Aku lihat lanyard kamu di kantin…"
+        placeholder="Halo! Aku lihat keychain NFC kamu…"
         class="input-field resize-none"
       />
-      <div class="mt-1 flex items-center justify-between">
-        <button
-          type="button"
-          class="inline-flex items-center gap-1.5 text-[11px] font-bold text-kenalan-600"
-          @click="pingMessage = generateIcebreaker(profile ?? {}, pingMessage)"
-        >
-          <WandSparkles class="h-3 w-3" aria-hidden="true" />
-          Pakai icebreaker
-        </button>
-        <span class="text-[11px] text-slate-400">{{ pingMessage.length }}/220</span>
-      </div>
+      <p class="mt-1 text-right text-[11px] text-slate-400">{{ pingMessage.length }}/220</p>
 
       <button
         type="button"
@@ -635,6 +705,81 @@ async function handleRefresh() {
         <LoaderCircle v-if="sendingPing" class="h-4 w-4 animate-spin" aria-hidden="true" />
         <Send v-else class="h-4 w-4" aria-hidden="true" />
         {{ sendingPing ? 'Mengirim…' : 'Kirim PING!' }}
+      </button>
+    </BottomSheet>
+
+    <!-- ============================================ visitor overflow menu -->
+    <BottomSheet :open="moreOpen" :busy="blocking" title="Opsi" @close="moreOpen = false">
+      <div class="space-y-2">
+        <button type="button" class="btn-ghost w-full !justify-start !py-3.5" @click="openReport">
+          <Flag class="h-4 w-4" aria-hidden="true" />
+          Laporkan {{ firstName }}
+        </button>
+        <button
+          v-if="alreadyMutual"
+          type="button"
+          class="btn-ghost w-full !justify-start !py-3.5"
+          :disabled="unmutualing"
+          @click="confirmUnmutual"
+        >
+          <LoaderCircle v-if="unmutualing" class="h-4 w-4 animate-spin" aria-hidden="true" />
+          <HeartCrack v-else class="h-4 w-4" aria-hidden="true" />
+          Putuskan mutual
+        </button>
+        <button
+          type="button"
+          class="btn-ghost w-full !justify-start !py-3.5 !text-blush-deep"
+          :disabled="blocking"
+          @click="confirmBlock"
+        >
+          <LoaderCircle v-if="blocking" class="h-4 w-4 animate-spin" aria-hidden="true" />
+          <Ban v-else class="h-4 w-4" aria-hidden="true" />
+          Blokir {{ firstName }}
+        </button>
+        <p class="px-1 pt-1 text-[11px] leading-relaxed text-slate-400">
+          Memblokir membatalkan PING yang belum dibalas dan menyembunyikan kalian dari satu
+          sama lain.
+        </p>
+      </div>
+    </BottomSheet>
+
+    <!-- ================================================== report composer -->
+    <BottomSheet
+      :open="reportSheetOpen"
+      :busy="submittingReport"
+      :title="`Laporkan ${firstName}`"
+      subtitle="Pilih alasan laporan kamu."
+      @close="reportSheetOpen = false"
+    >
+      <fieldset class="space-y-2" :disabled="submittingReport">
+        <legend class="sr-only">Alasan laporan</legend>
+        <label
+          v-for="reason in REPORT_REASONS"
+          :key="reason"
+          class="flex cursor-pointer items-center gap-3 rounded-2xl border-2 p-3 transition"
+          :class="reportReason === reason ? 'border-kenalan-400 bg-kenalan-50' : 'border-slate-100 bg-white'"
+        >
+          <input v-model="reportReason" type="radio" name="report-reason" :value="reason" class="sr-only" />
+          <span
+            class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2"
+            :class="reportReason === reason ? 'border-kenalan-500' : 'border-slate-300'"
+            aria-hidden="true"
+          >
+            <span v-if="reportReason === reason" class="h-2.5 w-2.5 rounded-full bg-kenalan-500" />
+          </span>
+          <span class="text-sm font-semibold text-slate-700">{{ reason }}</span>
+        </label>
+      </fieldset>
+
+      <button
+        type="button"
+        class="btn-primary mt-4 w-full !py-3.5"
+        :disabled="!reportReason || submittingReport"
+        @click="submitReport"
+      >
+        <LoaderCircle v-if="submittingReport" class="h-4 w-4 animate-spin" aria-hidden="true" />
+        <Flag v-else class="h-4 w-4" aria-hidden="true" />
+        {{ submittingReport ? 'Mengirim…' : 'Kirim laporan' }}
       </button>
     </BottomSheet>
 

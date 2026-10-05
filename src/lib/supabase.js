@@ -31,7 +31,7 @@ import { createClient } from '@supabase/supabase-js'
  *
  * nfc_tokens
  *   id           uuid primary key default gen_random_uuid()
- *   token        text unique not null          -- printed/encoded on the lanyard
+ *   token        text unique not null          -- printed/encoded on the NFC keychain
  *   status       text default 'unclaimed'      -- 'unclaimed' | 'claimed'
  *   user_id      uuid references profiles(id)  -- null while unclaimed
  *   claimed_at   timestamptz

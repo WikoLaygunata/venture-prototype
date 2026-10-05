@@ -15,7 +15,7 @@ const claimed = demoDb.nfc_tokens.filter((t) => t.status === 'claimed')
 const FEATURES = [
   {
     icon: Nfc,
-    title: 'Tap lanyard, langsung kenalan',
+    title: 'Tap keychain, langsung kenalan',
     text: 'Satu tap NFC membuka profil kampus tanpa tukar username.',
   },
   {
@@ -56,7 +56,7 @@ const FEATURES = [
         </span>
       </h1>
       <p class="mt-3 text-sm leading-relaxed text-slate-300">
-        Lanyard NFC + aplikasi sosial kampus. Kurangi awkward, perbanyak kenalan beneran.
+        Keychain NFC + aplikasi sosial kampus. Kurangi awkward, perbanyak kenalan beneran.
       </p>
 
       <div class="mt-7 space-y-2.5">
@@ -69,7 +69,7 @@ const FEATURES = [
           class="btn w-full !py-3.5 bg-white/10 text-white ring-1 ring-white/20 hover:bg-white/15"
         >
           <ScanLine class="h-4 w-4" aria-hidden="true" />
-          Aktifkan lanyard baru
+          Aktifkan keychain baru
         </RouterLink>
       </div>
 

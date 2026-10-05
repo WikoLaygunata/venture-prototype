@@ -1,6 +1,6 @@
 /**
- * The four Kenalan "Color Codes" — a physical/social signal shown on the lanyard
- * and mirrored in the app so people know how approachable you are right now.
+ * The four Kenalan "Color Codes" — a physical/social signal shown on the NFC
+ * keychain and mirrored in the app so people know how approachable you are.
  *
  * Keys are stored in `profiles.color_code`.
  */
@@ -48,7 +48,7 @@ export const COLOR_CODES = {
     key: 'red',
     emoji: '🔴',
     label: 'Red',
-    title: 'Looking for Connection',
+    title: 'Open for Connection',
     description: 'Aktif nyari kenalan baru — jangan ragu kirim PING!',
     dot: 'bg-blush',
     ring: 'ring-blush/40',

@@ -21,7 +21,7 @@ const routes = [
     meta: { hideNav: true },
   },
   {
-    /* SCENARIO 1 — fresh lanyard: /activate?token=KNL-NEW-01 */
+    /* SCENARIO 1 — fresh NFC keychain: /activate?token=KNL-NEW-01 */
     path: '/activate',
     name: 'activate',
     component: () => import('@/views/OnboardingView.vue'),
@@ -38,6 +38,30 @@ const routes = [
     name: 'map',
     component: () => import('@/views/MapView.vue'),
     meta: { requiresAuth: true },
+  },
+  {
+    /* A Location Stamp opened as a forum thread */
+    path: '/stamp/:id',
+    name: 'stamp-thread',
+    component: () => import('@/views/StampThreadView.vue'),
+    meta: { requiresAuth: true, hideNav: true },
+  },
+  {
+    /* Recommendations of people to mutualan with */
+    path: '/explore',
+    name: 'explore',
+    component: () => import('@/views/ExploreView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    /* Location Stamps from the last 30 days.
+       /history        -> your own (editable)
+       /history/:user_id -> someone else's, only if they made it public (read-only) */
+    path: '/history/:user_id?',
+    name: 'stamp-history',
+    component: () => import('@/views/StampHistoryView.vue'),
+    props: true,
+    meta: { requiresAuth: true, hideNav: true },
   },
   {
     path: '/mutualan',
@@ -59,8 +83,8 @@ const routes = [
     meta: { requiresAuth: true, hideNav: true },
   },
   {
-    /* SCENARIO 2 & 3 — someone scanned a claimed lanyard. Public on purpose:
-       guests must be able to view the profile before signing up. */
+    /* SCENARIO 2 & 3 — someone scanned a claimed NFC keychain. Public on
+       purpose: guests must be able to view the profile before signing up. */
     path: '/user/:user_id',
     name: 'user-profile',
     component: () => import('@/views/ProfileView.vue'),

@@ -1,52 +1,76 @@
 <script setup>
 /**
- * SocialLinks — button list for Instagram / LinkedIn / Spotify.
+ * SocialLinks — button list for a profile's social media.
  *
- * Accepts either a bare handle ("rakaprtm") or a full URL and normalises it,
- * because the edit form lets people paste whatever they have.
+ * Each network has a per-profile visibility (`public` / `mutual` / `off`) stored
+ * in `profile.social_visibility`. This component decides what the current viewer
+ * is allowed to see:
+ *   - the owner (`isSelf`) always sees everything, with a visibility tag
+ *   - a mutual sees `public` + `mutual`
+ *   - anyone else (incl. guests) sees only `public`
+ *
+ * Handles may be a bare username or a full URL; WhatsApp numbers are normalised
+ * to wa.me's digit format.
  */
 import { computed } from 'vue'
-import { ExternalLink, Instagram, Linkedin } from 'lucide-vue-next'
+import { ExternalLink, Instagram, Linkedin, MessageCircle, Phone } from 'lucide-vue-next'
+import { SOCIAL_NETWORKS } from '@/lib/socials'
 
 const props = defineProps({
   profile: { type: Object, default: () => ({}) },
+  /** Viewer is this profile's owner — sees all networks + visibility tags. */
+  isSelf: { type: Boolean, default: false },
+  /** Viewer has mutualan with this profile. */
+  isMutual: { type: Boolean, default: false },
 })
 
-function toUrl(value, base) {
+const ICONS = { instagram: Instagram, linkedin: Linkedin, whatsapp: Phone, line: MessageCircle }
+
+function toUrl(key, value, base) {
   if (!value) return null
   const raw = String(value).trim()
   if (!raw) return null
   if (/^https?:\/\//i.test(raw)) return raw
+
+  if (key === 'whatsapp') {
+    // Keep digits only; convert a leading 0 to Indonesia's 62 country code.
+    let digits = raw.replace(/[^\d]/g, '')
+    if (digits.startsWith('0')) digits = `62${digits.slice(1)}`
+    return digits ? base + digits : null
+  }
+
   return base + raw.replace(/^@/, '')
 }
 
+/** Can the current viewer see a network with this visibility setting? */
+function canView(visibility) {
+  const v = visibility ?? 'public'
+  if (props.isSelf) return true
+  if (v === 'off') return false
+  if (v === 'mutual') return props.isMutual
+  return true // public
+}
+
+const VIS_TAG = {
+  public: { label: 'Publik', class: 'bg-slate-100 text-slate-500' },
+  mutual: { label: 'Mutual aja', class: 'bg-kenalan-50 text-kenalan-600' },
+  off: { label: 'Off', class: 'bg-slate-100 text-slate-400' },
+}
+
 const links = computed(() =>
-  [
-    {
-      key: 'instagram',
-      label: 'Instagram',
-      handle: props.profile.instagram,
-      url: toUrl(props.profile.instagram, 'https://instagram.com/'),
-      icon: Instagram,
-      classes: 'bg-gradient-to-br from-fuchsia-500 via-rose-500 to-amber-400',
-    },
-    {
-      key: 'linkedin',
-      label: 'LinkedIn',
-      handle: props.profile.linkedin,
-      url: toUrl(props.profile.linkedin, 'https://linkedin.com/in/'),
-      icon: Linkedin,
-      classes: 'bg-[#0a66c2]',
-    },
-    {
-      key: 'spotify',
-      label: 'Spotify',
-      handle: props.profile.spotify,
-      url: toUrl(props.profile.spotify, 'https://open.spotify.com/user/'),
-      icon: null, // Lucide has no Spotify glyph — inline SVG below
-      classes: 'bg-[#1db954]',
-    },
-  ].filter((link) => Boolean(link.url)),
+  SOCIAL_NETWORKS.map((net) => {
+    const visibility = props.profile.social_visibility?.[net.key] ?? 'public'
+    return {
+      key: net.key,
+      label: net.label,
+      handle: props.profile[net.key],
+      url: toUrl(net.key, props.profile[net.key], net.baseUrl),
+      icon: ICONS[net.key] ?? null,
+      classes: net.brandClass,
+      visibility,
+      visible: canView(visibility),
+    }
+  }).filter((link) => Boolean(link.url) && link.visible),
 )
 </script>
 
@@ -75,15 +99,29 @@ const links = computed(() =>
       </span>
 
       <span class="min-w-0 flex-1">
-        <span class="block text-sm font-bold text-slate-700">{{ link.label }}</span>
+        <span class="flex items-center gap-1.5">
+          <span class="text-sm font-bold text-slate-700">{{ link.label }}</span>
+          <!-- show the owner how each link is gated -->
+          <span
+            v-if="isSelf && link.visibility !== 'public'"
+            class="rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide"
+            :class="VIS_TAG[link.visibility].class"
+          >
+            {{ VIS_TAG[link.visibility].label }}
+          </span>
+        </span>
         <span class="block truncate text-[11px] text-slate-400">{{ link.handle }}</span>
       </span>
 
       <ExternalLink class="h-4 w-4 shrink-0 text-slate-300" aria-hidden="true" />
     </a>
+
+    <p v-if="!isSelf && isMutual" class="px-1 text-[10px] text-slate-300">
+      Beberapa kontak hanya terlihat karena kalian sudah mutualan.
+    </p>
   </div>
 
   <p v-else class="rounded-2xl bg-slate-50 p-4 text-center text-xs text-slate-400">
-    Belum ada link sosial media yang ditambahkan.
+    {{ isSelf ? 'Belum ada link sosial media yang ditambahkan.' : 'Belum ada kontak yang bisa ditampilkan.' }}
   </p>
 </template>

@@ -1,14 +1,15 @@
 <script setup>
 /**
- * BottomNav — fixed tab bar pinned to the bottom of the mobile frame.
- * Three tabs: Explore/Map, Mutualan, Profile.
+ * BottomNav — the tab bar pinned to the bottom of the mobile frame.
+ * Four tabs: Map, Explore, Mutualan, Profile.
  *
- * It is `absolute` (not `fixed`) because it lives inside the phone frame in
- * App.vue; `fixed` would escape the frame and stick to the browser viewport.
+ * Rendered as a flex sibling (shrink-0) of the scrolling area in App.vue, so it
+ * reserves its own space and the feed never slides underneath it — the header
+ * and this bar stay put while only the content between them scrolls.
  */
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { Compass, Sparkles, UserRound } from 'lucide-vue-next'
+import { Compass, MapPin, Sparkles, UserRound } from 'lucide-vue-next'
 
 const props = defineProps({
   /** Unread PING count rendered as a dot on the Mutualan tab. */
@@ -18,7 +19,8 @@ const props = defineProps({
 const route = useRoute()
 
 const tabs = computed(() => [
-  { name: 'map', label: 'Explore', icon: Compass, to: { name: 'map' }, badge: 0 },
+  { name: 'map', label: 'Map', icon: MapPin, to: { name: 'map' }, badge: 0 },
+  { name: 'explore', label: 'Explore', icon: Compass, to: { name: 'explore' }, badge: 0 },
   { name: 'mutualan', label: 'Mutualan', icon: Sparkles, to: { name: 'mutualan' }, badge: props.badge },
   { name: 'profile', label: 'Profile', icon: UserRound, to: { name: 'profile' }, badge: 0 },
 ])
@@ -32,7 +34,7 @@ function isActive(tab) {
 
 <template>
   <nav
-    class="absolute bottom-0 left-0 right-0 z-30 border-t border-slate-100 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-lg"
+    class="z-30 shrink-0 border-t border-slate-100 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-lg"
     aria-label="Navigasi utama"
   >
     <ul class="flex items-stretch">
@@ -44,7 +46,7 @@ function isActive(tab) {
           :aria-current="isActive(tab) ? 'page' : undefined"
         >
           <span
-            class="absolute top-0 h-0.5 w-10 rounded-full bg-kenalan-500 transition-opacity"
+            class="absolute top-0 h-0.5 w-9 rounded-full bg-kenalan-500 transition-opacity"
             :class="isActive(tab) ? 'opacity-100' : 'opacity-0'"
             aria-hidden="true"
           />

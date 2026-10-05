@@ -1,9 +1,9 @@
 /**
- * Deferred lanyard claims.
+ * Deferred keychain claims.
  *
  * `claim_nfc_token()` derives the owner from `auth.uid()`, which means it needs
  * a session. When Supabase has email confirmation enabled there is no session
- * right after `signUp()` — so we remember which lanyard the person was holding
+ * right after `signUp()` — so we remember which keychain the person was holding
  * and finish the claim on their first successful login.
  *
  * Only the token string is stored, never credentials.

@@ -2,49 +2,34 @@
 /**
  * MutualanView — the connections tab.
  *
- * Three segments:
+ * Two segments:
  *   PING masuk  — pending requests; accepting one promotes the pair to mutuals
  *   Mutualan    — people you are already connected with
- *   Rekomendasi — profiles you have not connected with yet
+ *
+ * Discovery/recommendations live in their own Explore tab now, so there is no
+ * "Rekomendasi" segment here anymore.
  */
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import {
-  Ban,
-  CheckCheck,
-  Clock,
-  Heart,
-  Inbox,
-  LoaderCircle,
-  RefreshCw,
-  Send,
-  Sparkles,
-} from 'lucide-vue-next'
+import { Ban, CheckCheck, Clock, Compass, Heart, LoaderCircle, RefreshCw, Send } from 'lucide-vue-next'
 
 import AppHeader from '@/components/AppHeader.vue'
 import ColorCodeBadge from '@/components/ColorCodeBadge.vue'
 import StateBlock from '@/components/StateBlock.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 
-import {
-  fetchIncomingPings,
-  fetchMutuals,
-  fetchSentPings,
-  fetchSuggestedProfiles,
-  respondToPing,
-} from '@/lib/api'
+import { fetchIncomingPings, fetchMutuals, fetchSentPings, respondToPing } from '@/lib/api'
 import { timeAgo } from '@/lib/time'
 import { currentUserId } from '@/stores/auth'
 import { toast } from '@/stores/toast'
 
 const router = useRouter()
 
-const tab = ref('pings') // 'pings' | 'mutuals' | 'discover'
+const tab = ref('pings') // 'pings' | 'mutuals'
 
 const incoming = ref([])
 const sent = ref([])
 const mutuals = ref([])
-const suggestions = ref([])
 
 const loading = ref(true)
 const loadError = ref('')
@@ -57,16 +42,14 @@ async function load() {
   loadError.value = ''
 
   try {
-    const [incomingRows, sentRows, mutualRows, suggestionRows] = await Promise.all([
+    const [incomingRows, sentRows, mutualRows] = await Promise.all([
       fetchIncomingPings(currentUserId.value),
       fetchSentPings(currentUserId.value),
       fetchMutuals(currentUserId.value),
-      fetchSuggestedProfiles(currentUserId.value),
     ])
     incoming.value = incomingRows
     sent.value = sentRows
     mutuals.value = mutualRows
-    suggestions.value = suggestionRows
   } catch (error) {
     loadError.value = error.message
   } finally {
@@ -82,7 +65,6 @@ const pendingSent = computed(() => sent.value.filter((p) => p.status === 'pendin
 const tabs = computed(() => [
   { key: 'pings', label: 'PING masuk', count: pendingIncoming.value.length },
   { key: 'mutuals', label: 'Mutualan', count: mutuals.value.length },
-  { key: 'discover', label: 'Rekomendasi', count: suggestions.value.length },
 ])
 
 async function respond(ping, status) {
@@ -92,7 +74,6 @@ async function respond(ping, status) {
 
     if (status === 'accepted') {
       toast.success(`Kamu dan ${ping.sender?.full_name?.split(' ')[0]} sekarang mutualan 🎉`)
-      // Re-read so the mutuals list and suggestions stay in sync.
       await load()
       tab.value = 'mutuals'
     } else {
@@ -162,7 +143,7 @@ function openProfile(userId) {
             :empty="pendingIncoming.length === 0"
             empty-icon="📮"
             empty-title="Belum ada PING masuk"
-            empty-text="Kalau ada yang scan lanyard kamu dan tertarik, PING-nya muncul di sini."
+            empty-text="Kalau ada yang scan keychain NFC kamu dan tertarik, PING-nya muncul di sini."
             :retryable="false"
           >
             <div class="space-y-3">
@@ -254,7 +235,7 @@ function openProfile(userId) {
         </template>
 
         <!-- ================================================ mutualan -->
-        <template v-else-if="tab === 'mutuals'">
+        <template v-else>
           <StateBlock
             :empty="mutuals.length === 0"
             empty-icon="🤝"
@@ -263,10 +244,10 @@ function openProfile(userId) {
             :retryable="false"
           >
             <template #action>
-              <button type="button" class="btn-secondary mt-2 !py-2.5 !text-xs" @click="tab = 'discover'">
-                <Sparkles class="h-3.5 w-3.5" aria-hidden="true" />
-                Lihat rekomendasi
-              </button>
+              <RouterLink :to="{ name: 'explore' }" class="btn-secondary mt-2 !py-2.5 !text-xs">
+                <Compass class="h-3.5 w-3.5" aria-hidden="true" />
+                Cari orang di Explore
+              </RouterLink>
             </template>
 
             <div class="space-y-2.5">
@@ -286,43 +267,6 @@ function openProfile(userId) {
                   <ColorCodeBadge :code="person.color_code" size="sm" class="mt-1.5" />
                 </div>
                 <CheckCheck class="h-4 w-4 shrink-0 text-mint" aria-hidden="true" />
-              </button>
-            </div>
-          </StateBlock>
-        </template>
-
-        <!-- ============================================== rekomendasi -->
-        <template v-else>
-          <StateBlock
-            :empty="suggestions.length === 0"
-            empty-icon="🔍"
-            empty-title="Belum ada rekomendasi"
-            empty-text="Kamu udah kenalan sama semua orang yang ada di sistem. Impressive."
-            :retryable="false"
-          >
-            <p class="mb-3 text-[11px] leading-relaxed text-slate-400">
-              Orang-orang yang belum kamu kenalan. Ketuk buat lihat profil lengkap dan kirim PING.
-            </p>
-            <div class="space-y-2.5">
-              <button
-                v-for="person in suggestions"
-                :key="person.id"
-                type="button"
-                class="flex w-full items-center gap-3 rounded-2xl border border-slate-100 bg-white p-3.5 text-left shadow-sm transition hover:border-kenalan-200 active:scale-[0.99]"
-                @click="openProfile(person.id)"
-              >
-                <UserAvatar :profile="person" size="md" />
-                <div class="min-w-0 flex-1">
-                  <p class="truncate text-sm font-bold text-slate-800">{{ person.full_name }}</p>
-                  <p class="truncate text-[11px] text-slate-400">
-                    {{ person.major || 'Mahasiswa' }}
-                  </p>
-                  <p v-if="person.bio" class="mt-1 line-clamp-2 text-[11px] leading-snug text-slate-500">
-                    {{ person.bio }}
-                  </p>
-                  <ColorCodeBadge :code="person.color_code" size="sm" class="mt-1.5" />
-                </div>
-                <Inbox class="h-4 w-4 shrink-0 text-slate-300" aria-hidden="true" />
               </button>
             </div>
           </StateBlock>
