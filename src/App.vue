@@ -45,7 +45,7 @@ watch(() => route.fullPath, refreshBadge)
 <template>
   <div class="h-[100dvh] bg-slate-900 flex justify-center items-center p-0 sm:p-4 overflow-hidden">
     <div
-      class="w-full max-w-md bg-white h-[100dvh] sm:h-[844px] sm:max-h-[100dvh] sm:rounded-[40px] shadow-2xl relative flex flex-col overflow-hidden border-0 sm:border-4 border-slate-800"
+      class="w-full max-w-md sm:max-w-[22rem] bg-white h-[100dvh] sm:h-[844px] sm:max-h-[100dvh] sm:rounded-[40px] shadow-2xl relative flex flex-col overflow-hidden border-0 sm:border-4 border-slate-800"
     >
       <ToastHost />
 

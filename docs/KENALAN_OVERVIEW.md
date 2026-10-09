@@ -1,12 +1,11 @@
 # Kenalan — Ringkasan Fitur, Flow & Arsitektur
 
 Dokumen hidup untuk prototype **Kenalan** (NFC keychain + aplikasi sosial kampus).
-Isinya: apa yang sudah terbangun, bagaimana tiap flow bekerja, dan daftar saran
-improvisasi.
+Isinya: apa yang sudah terbangun dan bagaimana tiap flow bekerja.
 
 > Status: **prototype frontend**. Jalan penuh di _demo mode_ (mock lokal) tanpa
 > backend. Catatan penting: migrasi SQL di `supabase/` **masih versi lama** dan
-> belum disinkronkan dengan perubahan terbaru (lihat [bagian 11](#11-status-sinkronisasi-sql)).
+> belum disinkronkan dengan perubahan terbaru (lihat [bagian 10](#10-status-sinkronisasi-sql)).
 
 ---
 
@@ -53,7 +52,7 @@ Kredensial demo: `demo@kenalan.id` / `kenalan123` (atau tombol satu-tap di login
 |---|---|---|---|---|
 | `/` | home | redirect | — | → `/map` kalau login, else `/welcome` |
 | `/welcome` | landing | publik | ✕ | Hero + simulasi scan NFC |
-| `/activate?token=XXX` | activate | publik | ✕ | Aktivasi keychain (Skenario 1) |
+| `/t/:token` | activate | publik | ✕ | Aktivasi keychain (Skenario 1); token di path, link pendek & estetik |
 | `/login?redirect=…` | login | guest-only | ✕ | Login & Register |
 | `/map` | map | perlu login | ✓ | Feed Location Stamp (24 jam) |
 | `/stamp/:id` | stamp-thread | perlu login | ✕ | Thread/forum sebuah stamp |
@@ -87,7 +86,7 @@ dengan `overflow-hidden`. Konsekuensinya:
 
 ## 5. Tiga Skenario Scan NFC
 
-### Skenario 1 — Keychain baru (`/activate?token=XYZ`)
+### Skenario 1 — Keychain baru (`/t/:token`, mis. `/t/KNL-NEW-01`)
 `OnboardingView.vue` cek token via `resolve_nfc_token`:
 - tidak ada → "Token tidak dikenali"; **unclaimed** → form registrasi (token
   terkunci) → `signUp()` + `claim_nfc_token()`; **claimed** → auto-redirect ke
@@ -252,31 +251,14 @@ src/
 ├── views/          Onboarding, Login, Profile, Map, StampThread, StampHistory,
 │                   Explore, Mutualan, EditProfile, Landing, NotFound
 └── App.vue         frame mobile tinggi-tetap (header + nav pinned)
-supabase/           ⚠️ masih skema LAMA — lihat bagian 11
+supabase/           ⚠️ masih skema LAMA — lihat bagian 10
 ```
 
 Prinsip: **view hanya memanggil `src/lib/api.js`**.
 
 ---
 
-## 10. Saran Improvisasi (lanjutan)
-
-Masih relevan dan belum dikerjakan:
-
-1. **Realtime** PING + feed stamp + thread (Supabase Realtime) biar update tanpa refresh.
-2. **Notifikasi PING diterima** untuk si pengirim.
-3. **Chat ringan setelah mutualan** (lanjutan dari PING satu arah).
-4. **Auto-expiry Color Code** (mis. Focus Mode reset otomatis).
-5. **Minat sebagai tag yang bisa difilter** di Explore.
-6. **Upload gambar nyata** ke Supabase Storage (sekarang stamp image = data URL lokal).
-7. **Verifikasi email kampus** saat registrasi.
-8. **Rate-limit `resolve_nfc_token`** anti brute-force token.
-9. **Kontrol privasi profil** untuk guest (sekarang profil 100% publik).
-10. **Testing** unit `lib/` + e2e tiga skenario scan, dan **i18n** bila perlu.
-
----
-
-## 11. Status Sinkronisasi SQL
+## 10. Status Sinkronisasi SQL
 
 ⚠️ **Penting.** Perubahan ronde ini hanya menyentuh frontend + demo mode. File di
 `supabase/` **belum diperbarui** dan sekarang tidak sinkron dengan model data baru:
@@ -316,7 +298,7 @@ Bilang saja kalau mau aku lanjut membuat migrasi SQL baru untuk menyinkronkan in
 
 ---
 
-## 12. Ruang untuk Perubahan Flow
+## 11. Ruang untuk Perubahan Flow
 
 ### Perubahan yang diinginkan
 - [ ] _(tulis di sini)_
@@ -324,7 +306,7 @@ Bilang saja kalau mau aku lanjut membuat migrasi SQL baru untuk menyinkronkan in
 
 ### Pertanyaan terbuka
 - Visibilitas sosmed `mutual`/`off` saat ini ditegakkan di sisi klien
-  (`SocialLinks`). Untuk produksi perlu dipindah ke server — lihat bagian 11.
+  (`SocialLinks`). Untuk produksi perlu dipindah ke server — lihat bagian 10.
 
 ---
 

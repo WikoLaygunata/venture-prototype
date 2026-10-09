@@ -107,7 +107,7 @@ const FEATURES = [
           <RouterLink
             v-for="token in unclaimed.slice(0, 1)"
             :key="token.token"
-            :to="{ name: 'activate', query: { token: token.token } }"
+            :to="{ name: 'activate', params: { token: token.token } }"
             class="flex items-center gap-2.5 rounded-2xl bg-white/5 p-3 ring-1 ring-white/10 transition hover:bg-white/10"
           >
             <span class="rounded-lg bg-mint/20 px-2 py-1 text-[10px] font-bold text-mint">BARU</span>
@@ -121,7 +121,7 @@ const FEATURES = [
           <RouterLink
             v-for="token in claimed.slice(0, 2)"
             :key="token.token"
-            :to="{ name: 'activate', query: { token: token.token } }"
+            :to="{ name: 'activate', params: { token: token.token } }"
             class="flex items-center gap-2.5 rounded-2xl bg-white/5 p-3 ring-1 ring-white/10 transition hover:bg-white/10"
           >
             <span class="rounded-lg bg-kenalan-400/20 px-2 py-1 text-[10px] font-bold text-kenalan-200">

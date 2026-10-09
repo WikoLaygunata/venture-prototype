@@ -2,7 +2,9 @@
 /**
  * OnboardingView — SCENARIO 1: somebody tapped a Kenalan NFC keychain.
  *
- * URL: /activate?token=XYZ
+ * URL: /t/:token  (e.g. /t/KNL-NEW-01) — the token is written to the keychain
+ * once when it's made, so the link stays short and pretty. Opening the route
+ * resolves the token (backend) and this view decides where the visitor goes.
  *
  * The token decides the whole screen:
  *   no token          -> ask them to type the code printed on the keychain
@@ -55,7 +57,7 @@ const submitting = ref(false)
 const formError = ref('')
 
 const token = computed(() => {
-  const raw = route.query.token
+  const raw = route.params.token
   return typeof raw === 'string' ? raw.trim() : ''
 })
 
@@ -109,7 +111,7 @@ watch(token, checkToken)
 function submitManualToken() {
   const value = manualToken.value.trim()
   if (!value) return
-  router.replace({ name: 'activate', query: { token: value } })
+  router.replace({ name: 'activate', params: { token: value } })
 }
 
 /* --------------------------------------------------------------- suggestions */

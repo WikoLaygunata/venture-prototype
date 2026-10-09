@@ -21,10 +21,15 @@ const routes = [
     meta: { hideNav: true },
   },
   {
-    /* SCENARIO 1 — fresh NFC keychain: /activate?token=KNL-NEW-01 */
-    path: '/activate',
+    /* SCENARIO 1 — fresh NFC keychain. The token is baked into the keychain's
+       URL once at manufacture time, so we keep the link short and pretty:
+       /t/KNL-NEW-01 (no query string). No token (/t) → manual entry screen.
+       When this route is opened the backend resolves the token and this view
+       routes the visitor onward (owner profile vs. registration form). */
+    path: '/t/:token?',
     name: 'activate',
     component: () => import('@/views/OnboardingView.vue'),
+    props: true,
     meta: { hideNav: true },
   },
   {
