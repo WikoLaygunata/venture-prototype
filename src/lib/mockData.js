@@ -14,7 +14,18 @@ import { hoursAgo, minutesAgo } from './time'
 // favour of location_label + image_url + distance_m, and stamp_replies / blocks
 // / reports are new. The seed-merge in load() keeps older snapshots from
 // breaking, but a reset is cleaner if you were on v3.
-const STORAGE_KEY = 'kenalan.demo.v6'
+const STORAGE_KEY = 'kenalan.demo.v8'
+
+/** Remembered stamp audience choice ('public' | 'mutual'), its own key. */
+const STAMP_AUDIENCE_KEY = 'kenalan.stampAudience'
+
+/**
+ * Default campus center for the map. Stamps carry real lat/lng now so Leaflet
+ * can place them; when a user drops a stamp without geolocation we fan it out a
+ * little around this point. (This is a generic campus-ish spot in Depok, ID —
+ * swap for your real campus coords.)
+ */
+export const CAMPUS_CENTER = { lat: -6.3629, lng: 106.8275 }
 
 /** Credentials that "work" in demo mode. */
 export const DEMO_CREDENTIALS = {
@@ -245,6 +256,9 @@ function seed() {
         location_label: 'Deket area kantin',
         distance_m: 40,
         bearing_deg: 35,
+        lat: -6.3625,
+        lng: 106.8279,
+        audience: 'mutual',
         message: 'Nyari temen ngopi sore ini, lagi santai aja. Meja deket jendela ya!',
         image_url: photo('coffee-table'),
         created_at: minutesAgo(18),
@@ -255,6 +269,8 @@ function seed() {
         location_label: 'Gedung sebelah barat, lantai atas',
         distance_m: 180,
         bearing_deg: 270,
+        lat: -6.3631,
+        lng: 106.8262,
         message: 'Nugas ML, butuh second opinion soal dataset. Boleh mampir diskusi.',
         image_url: photo('laptop-dataset'),
         created_at: hoursAgo(2),
@@ -265,6 +281,8 @@ function seed() {
         location_label: 'Area terbuka tengah kampus',
         distance_m: 95,
         bearing_deg: 150,
+        lat: -6.3637,
+        lng: 106.8281,
         message: 'Lagi nunggu jadwal kosong. Open buat ngobrol random sampe jam 4.',
         image_url: '',
         created_at: hoursAgo(4),
@@ -275,6 +293,8 @@ function seed() {
         location_label: 'Kedai kopi dekat gerbang',
         distance_m: 520,
         bearing_deg: 310,
+        lat: -6.3598,
+        lng: 106.8251,
         message: 'Matcha-nya lagi promo. Ada yang mau nemenin brainstorming brand?',
         image_url: photo('matcha-latte'),
         created_at: hoursAgo(7),
@@ -285,6 +305,9 @@ function seed() {
         location_label: 'Lapangan olahraga',
         distance_m: 1200,
         bearing_deg: 205,
+        lat: -6.3688,
+        lng: 106.8233,
+        audience: 'mutual',
         message: 'Futsal sore, masih kurang 2 orang. Gabung aja langsung.',
         image_url: '',
         created_at: hoursAgo(11),
@@ -296,6 +319,8 @@ function seed() {
         location_label: 'Perpus lama',
         distance_m: 60,
         bearing_deg: 90,
+        lat: -6.3627,
+        lng: 106.8269,
         message: 'Stamp lama yang seharusnya nggak muncul di feed.',
         image_url: '',
         created_at: hoursAgo(30),
@@ -308,6 +333,8 @@ function seed() {
         location_label: 'Perpus lantai 3',
         distance_m: 0,
         bearing_deg: 0,
+        lat: -6.3633,
+        lng: 106.8271,
         message: 'Nugas bareng yuk, aku bawa cemilan.',
         image_url: photo('study-session'),
         created_at: hoursAgo(28),
@@ -318,6 +345,8 @@ function seed() {
         location_label: 'Coffee corner',
         distance_m: 0,
         bearing_deg: 0,
+        lat: -6.3619,
+        lng: 106.8288,
         message: 'Ngopi sore sambil review desain, mampir aja.',
         image_url: '',
         created_at: hoursAgo(26 + 2 * 24),
@@ -328,6 +357,8 @@ function seed() {
         location_label: 'Student center',
         distance_m: 0,
         bearing_deg: 0,
+        lat: -6.3641,
+        lng: 106.8259,
         message: 'Rapat kecil komunitas, open buat yang penasaran.',
         image_url: photo('community-meetup'),
         created_at: hoursAgo(10 * 24),
@@ -338,6 +369,8 @@ function seed() {
         location_label: 'Taman fakultas',
         distance_m: 0,
         bearing_deg: 0,
+        lat: -6.3609,
+        lng: 106.8273,
         message: 'Sketsa pagi sebelum kelas. Produktif dikit.',
         image_url: '',
         created_at: hoursAgo(22 * 24),
@@ -460,4 +493,30 @@ export function randomDistance() {
 /** Random compass bearing (0..359°) for a freshly dropped stamp. */
 export function randomBearing() {
   return Math.floor(Math.random() * 360)
+}
+
+/* ----------------------------------------------- stamp audience preference */
+
+export const STAMP_AUDIENCES = ['public', 'mutual']
+export const DEFAULT_STAMP_AUDIENCE = 'public'
+
+/** The audience the user last picked, so the form doesn't reset every time. */
+export function getStampAudiencePref() {
+  if (typeof localStorage === 'undefined') return DEFAULT_STAMP_AUDIENCE
+  try {
+    const saved = localStorage.getItem(STAMP_AUDIENCE_KEY)
+    return STAMP_AUDIENCES.includes(saved) ? saved : DEFAULT_STAMP_AUDIENCE
+  } catch {
+    return DEFAULT_STAMP_AUDIENCE
+  }
+}
+
+export function setStampAudiencePref(audience) {
+  if (typeof localStorage === 'undefined') return
+  if (!STAMP_AUDIENCES.includes(audience)) return
+  try {
+    localStorage.setItem(STAMP_AUDIENCE_KEY, audience)
+  } catch {
+    /* storage blocked — not critical */
+  }
 }

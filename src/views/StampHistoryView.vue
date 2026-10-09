@@ -170,6 +170,13 @@ async function removeStamp(stamp) {
                   <MessageCircle class="h-3 w-3" aria-hidden="true" />
                   {{ stamp.reply_count ?? 0 }} balasan
                 </span>
+                <span
+                  v-if="(stamp.audience ?? 'public') === 'mutual'"
+                  class="inline-flex items-center gap-1.5 rounded-full bg-kenalan-100 px-2.5 py-1 text-[11px] font-semibold text-kenalan-700"
+                >
+                  <Lock class="h-3 w-3" aria-hidden="true" />
+                  Mutual aja
+                </span>
               </div>
 
               <button

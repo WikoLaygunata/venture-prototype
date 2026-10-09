@@ -61,17 +61,49 @@ export function shortDate(iso) {
 }
 
 /**
+ * Great-circle distance between two {lat,lng} points, in metres (haversine).
+ * Returns null if either point is missing a coordinate.
+ */
+export function haversineMeters(a, b) {
+  if (a?.lat == null || a?.lng == null || b?.lat == null || b?.lng == null) return null
+  const R = 6371000 // Earth radius (m)
+  const toRad = (d) => (d * Math.PI) / 180
+  const dLat = toRad(b.lat - a.lat)
+  const dLng = toRad(b.lng - a.lng)
+  const lat1 = toRad(a.lat)
+  const lat2 = toRad(b.lat)
+  const h =
+    Math.sin(dLat / 2) ** 2 + Math.sin(dLng / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2)
+  return 2 * R * Math.asin(Math.sqrt(h))
+}
+
+/**
  * Human-friendly distance label.
  *
- * The prototype has no real geolocation, so stamps carry a precomputed
- * `distance_m` (metres) and this formats it. Under 1 km shows metres, above
- * that shows one decimal of km.
+ * Pass the real distance in metres (e.g. from `haversineMeters`). When it's
+ * null/unknown — e.g. the viewer hasn't shared their location — this says so
+ * instead of inventing a number. Under 1 km shows metres, above that km.
  */
 export function distanceLabel(metres) {
-  if (metres == null || Number.isNaN(metres)) return 'di sekitar sini'
+  if (metres == null || Number.isNaN(metres)) return 'jarak belum diketahui'
   if (metres < 15) return 'tepat di sekitarmu'
   if (metres < 1000) return `± ${Math.round(metres / 5) * 5} m dari kamu`
   return `± ${(metres / 1000).toFixed(1)} km dari kamu`
+}
+
+/**
+ * Initial compass bearing (degrees, 0 = North, clockwise) from point a to b.
+ * Returns null if either point lacks a coordinate.
+ */
+export function bearingDeg(a, b) {
+  if (a?.lat == null || a?.lng == null || b?.lat == null || b?.lng == null) return null
+  const toRad = (d) => (d * Math.PI) / 180
+  const lat1 = toRad(a.lat)
+  const lat2 = toRad(b.lat)
+  const dLng = toRad(b.lng - a.lng)
+  const y = Math.sin(dLng) * Math.cos(lat2)
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng)
+  return (Math.atan2(y, x) * 180) / Math.PI // may be negative; compassLabel normalises
 }
 
 /**

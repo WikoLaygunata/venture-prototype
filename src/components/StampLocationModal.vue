@@ -2,21 +2,18 @@
 /**
  * StampLocationModal — a mini "where is this stamp" map.
  *
- * Shows YOU at the centre and the stamp as a dot placed by its approximate
- * distance + bearing. The prototype has no real coordinates, so this is a
- * relative radar, not a street map: the point still conveys roughly how far and
- * in which direction the stamp is.
- *
- * If the viewer turns on location, a live "you" indicator lights up and the
- * direction hint ("ke arah Timur Laut") is shown to help them orient.
+ * Now a real Leaflet map (via StampMap) centred on the stamp's coordinates,
+ * with the stamp marker and — when geolocation is on — a live "you" marker.
+ * The distance/direction summary stays as a quick textual orientation.
  */
-import { computed, watch } from 'vue'
-import { LocateFixed, MapPin, Navigation } from 'lucide-vue-next'
+import { computed, ref, watch } from 'vue'
+import { LocateFixed, Navigation } from 'lucide-vue-next'
 
 import BottomSheet from '@/components/BottomSheet.vue'
+import StampMap from '@/components/StampMap.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 import { useGeolocation } from '@/lib/useGeolocation'
-import { compassLabel, distanceLabel } from '@/lib/time'
+import { bearingDeg, compassLabel, distanceLabel, haversineMeters } from '@/lib/time'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -25,35 +22,49 @@ const props = defineProps({
 
 defineEmits(['close'])
 
-const { status: geoStatus, error: geoError, request: requestGeo } = useGeolocation()
+const { status: geoStatus, coords: geoCoords, error: geoError, request: requestGeo } =
+  useGeolocation()
 
 const profile = computed(() => props.stamp?.profile ?? {})
-const distanceM = computed(() => props.stamp?.distance_m ?? 0)
-const bearing = computed(() => props.stamp?.bearing_deg ?? 0)
 const label = computed(() => props.stamp?.location_label?.trim() || '')
-const direction = computed(() => compassLabel(bearing.value))
 const geoActive = computed(() => geoStatus.value === 'active')
 
-/**
- * Place the stamp dot inside the radar. The farthest seeded stamp is ~1.2km, so
- * we compress distance with a sqrt curve and cap the radius so very far stamps
- * still sit inside the ring instead of flying off the edge.
- */
-const dotStyle = computed(() => {
-  const maxR = 44 // % from centre to the inner edge of the outer ring
-  const normalized = Math.min(1, Math.sqrt(distanceM.value / 1500))
-  const r = 6 + normalized * maxR
-  // bearing: 0° = North (up), clockwise. Convert to maths angle.
-  const rad = ((bearing.value - 90) * Math.PI) / 180
-  const x = 50 + r * Math.cos(rad)
-  const y = 50 + r * Math.sin(rad)
-  return { left: `${x}%`, top: `${y}%` }
+// Real distance + bearing from the viewer's location to the stamp, computed
+// from coordinates. Null until the viewer shares their location.
+const distanceM = computed(() => {
+  if (!props.stamp || !geoCoords.value || props.stamp.lat == null) return null
+  return haversineMeters(
+    { lat: geoCoords.value.lat, lng: geoCoords.value.lng },
+    { lat: props.stamp.lat, lng: props.stamp.lng },
+  )
 })
+const bearing = computed(() => {
+  if (!props.stamp || !geoCoords.value || props.stamp.lat == null) return null
+  return bearingDeg(
+    { lat: geoCoords.value.lat, lng: geoCoords.value.lng },
+    { lat: props.stamp.lat, lng: props.stamp.lng },
+  )
+})
+const direction = computed(() => (bearing.value == null ? '' : compassLabel(bearing.value)))
 
-// Reset nothing on open; geolocation stays sticky across opens within a session.
+/** StampMap wants an array; feed it just this one stamp (if it has coords). */
+const mapStamps = computed(() =>
+  props.stamp && props.stamp.lat != null && props.stamp.lng != null ? [props.stamp] : [],
+)
+const userCoords = computed(() =>
+  geoCoords.value ? { lat: geoCoords.value.lat, lng: geoCoords.value.lng } : null,
+)
+const hasCoords = computed(() => mapStamps.value.length > 0)
+
+const mapRef = ref(null)
+
+// When the sheet opens, the map mounts fresh; nudge it to re-measure once the
+// open animation has settled.
 watch(
   () => props.open,
-  () => {},
+  (isOpen) => {
+    if (isOpen) setTimeout(() => mapRef.value?.refresh?.(), 220)
+  },
 )
 </script>
 
@@ -61,88 +72,22 @@ watch(
   <BottomSheet
     :open="open"
     :title="`Lokasi ${profile.full_name || 'stamp'}`"
-    subtitle="Perkiraan posisi relatif — bukan titik persis."
+    subtitle="Lokasi perkiraan di peta."
     @close="$emit('close')"
   >
     <div v-if="stamp" class="space-y-4">
-      <!-- radar mini map -->
+      <!-- leaflet mini map -->
       <div
-        class="relative mx-auto aspect-square w-full max-w-[18rem] overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-kenalan-50 via-sky-50 to-emerald-50"
-        role="img"
-        :aria-label="`Peta mini: stamp berjarak ${distanceLabel(distanceM)}${direction ? `, ke arah ${direction}` : ''}`"
+        v-if="hasCoords"
+        class="relative mx-auto h-56 w-full overflow-hidden rounded-3xl border border-slate-200 shadow-card"
       >
-        <!-- range rings -->
-        <div class="absolute inset-0 flex items-center justify-center" aria-hidden="true">
-          <span class="absolute h-1/4 w-1/4 rounded-full border border-kenalan-200" />
-          <span class="absolute h-1/2 w-1/2 rounded-full border border-kenalan-200/70" />
-          <span class="absolute h-3/4 w-3/4 rounded-full border border-kenalan-200/40" />
-          <span class="absolute h-[1px] w-full bg-kenalan-200/40" />
-          <span class="absolute h-full w-[1px] bg-kenalan-200/40" />
-        </div>
-
-        <!-- compass N marker -->
-        <span
-          class="absolute left-1/2 top-1.5 -translate-x-1/2 text-[10px] font-bold text-slate-400"
-          aria-hidden="true"
-        >
-          N
-        </span>
-
-        <!-- line from me to the stamp -->
-        <svg class="absolute inset-0 h-full w-full" aria-hidden="true">
-          <line
-            x1="50%"
-            y1="50%"
-            :x2="dotStyle.left"
-            :y2="dotStyle.top"
-            stroke="currentColor"
-            class="text-kenalan-400"
-            stroke-width="2"
-            stroke-dasharray="4 4"
-          />
-        </svg>
-
-        <!-- me (centre) -->
-        <div
-          class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
-          aria-hidden="true"
-        >
-          <span
-            v-if="geoActive"
-            class="absolute inset-0 m-auto h-4 w-4 animate-pulse-ring rounded-full bg-sky-400"
-          />
-          <span
-            class="relative block h-4 w-4 rounded-full ring-4 ring-white"
-            :class="geoActive ? 'bg-sky-500' : 'bg-slate-400'"
-          />
-        </div>
-
-        <!-- the stamp -->
-        <div
-          class="absolute -translate-x-1/2 -translate-y-1/2"
-          :style="dotStyle"
-        >
-          <div class="relative">
-            <span class="absolute inset-0 m-auto h-5 w-5 animate-pulse-ring rounded-full bg-kenalan-400" />
-            <span
-              class="relative flex h-6 w-6 items-center justify-center rounded-full bg-kenalan-500 text-white ring-4 ring-white"
-            >
-              <MapPin class="h-3.5 w-3.5" aria-hidden="true" />
-            </span>
-          </div>
-        </div>
+        <StampMap ref="mapRef" :stamps="mapStamps" :user-coords="userCoords" readonly />
       </div>
-
-      <!-- legend -->
-      <div class="flex items-center justify-center gap-4 text-[11px] font-semibold">
-        <span class="inline-flex items-center gap-1.5 text-slate-500">
-          <span class="h-2.5 w-2.5 rounded-full" :class="geoActive ? 'bg-sky-500' : 'bg-slate-400'" />
-          Kamu
-        </span>
-        <span class="inline-flex items-center gap-1.5 text-kenalan-600">
-          <span class="h-2.5 w-2.5 rounded-full bg-kenalan-500" />
-          Stamp
-        </span>
+      <div
+        v-else
+        class="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-8 text-center text-xs text-slate-400"
+      >
+        Stamp ini belum punya titik koordinat di peta.
       </div>
 
       <!-- distance + direction -->
@@ -161,7 +106,7 @@ watch(
       <div v-if="!geoActive" class="rounded-2xl border border-kenalan-100 bg-kenalan-50/60 p-3.5">
         <p class="text-xs font-bold text-kenalan-700">Aktifkan lokasi kamu</p>
         <p class="mt-1 text-[11px] leading-relaxed text-kenalan-700/70">
-          Biar titik kamu muncul dan lebih gampang lihat arahnya ke stamp ini.
+          Biar titik kamu muncul di peta dan lebih gampang lihat arahnya ke stamp ini.
         </p>
         <p v-if="geoError" class="mt-1.5 text-[11px] font-semibold text-blush-deep">{{ geoError }}</p>
         <button
@@ -181,22 +126,18 @@ watch(
       >
         <LocateFixed class="h-4 w-4 shrink-0" aria-hidden="true" />
         <p class="text-[11px] font-semibold">
-          Lokasi kamu aktif — titik birunya kamu. Jarak persis disamarkan demi privasi.
+          Lokasi kamu aktif — titik birunya kamu.
         </p>
       </div>
 
       <!-- author chip -->
-      <button
-        type="button"
-        class="flex w-full items-center gap-3 rounded-2xl bg-slate-50 p-3 text-left"
-        disabled
-      >
+      <div class="flex w-full items-center gap-3 rounded-2xl bg-slate-50 p-3">
         <UserAvatar :profile="profile" size="sm" />
         <div class="min-w-0">
           <p class="truncate text-sm font-bold text-slate-700">{{ profile.full_name }}</p>
           <p class="truncate text-[11px] text-slate-400">{{ profile.major || 'Mahasiswa' }}</p>
         </div>
-      </button>
+      </div>
     </div>
   </BottomSheet>
 </template>

@@ -8,7 +8,7 @@
  */
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { LoaderCircle, MapPin, Send, Trash2 } from 'lucide-vue-next'
+import { Lock, LoaderCircle, MapPin, Send, Trash2 } from 'lucide-vue-next'
 
 import AppHeader from '@/components/AppHeader.vue'
 import ColorCodeBadge from '@/components/ColorCodeBadge.vue'
@@ -22,7 +22,8 @@ import {
   fetchStamp,
   fetchStampReplies,
 } from '@/lib/api'
-import { distanceLabel, isFresh, timeAgo } from '@/lib/time'
+import { distanceLabel, haversineMeters, isFresh, timeAgo } from '@/lib/time'
+import { useGeolocation } from '@/lib/useGeolocation'
 import { currentUserId } from '@/stores/auth'
 import { toast } from '@/stores/toast'
 
@@ -41,12 +42,32 @@ const sending = ref(false)
 const scroller = ref(null)
 const locationOpen = ref(false)
 
+const { coords: geoCoords } = useGeolocation()
+
 const isOwn = computed(() => stamp.value?.user_id === currentUserId.value)
 const expired = computed(() => stamp.value && !isFresh(stamp.value.created_at))
+const isMutualOnly = computed(() => (stamp.value?.audience ?? 'public') === 'mutual')
+
+/**
+ * Real distance from the viewer to the stamp, computed from coordinates — not
+ * the seed's fictional `distance_m`. It's your own stamp -> no distance; no
+ * geolocation yet -> null (label says "jarak belum diketahui").
+ */
+const distanceM = computed(() => {
+  if (!stamp.value || isOwn.value) return null
+  if (!geoCoords.value || stamp.value.lat == null) return null
+  return haversineMeters(
+    { lat: geoCoords.value.lat, lng: geoCoords.value.lng },
+    { lat: stamp.value.lat, lng: stamp.value.lng },
+  )
+})
+
 const where = computed(() => {
   if (!stamp.value) return ''
   const label = stamp.value.location_label?.trim()
-  const dist = distanceLabel(stamp.value.distance_m)
+  if (isOwn.value) return label || 'Lokasi stamp kamu'
+  // No viewer location -> don't fake a distance; show label or a map hint.
+  const dist = geoCoords.value ? distanceLabel(distanceM.value) : 'lihat di peta'
   return label ? `${label} · ${dist}` : dist
 })
 
@@ -54,13 +75,17 @@ async function load() {
   loading.value = true
   loadError.value = ''
   try {
-    const [s, r] = await Promise.all([fetchStamp(stampId.value), fetchStampReplies(stampId.value)])
+    const s = await fetchStamp(stampId.value, currentUserId.value)
     if (!s) {
       loadError.value = 'Stamp ini sudah hangus atau dihapus.'
       return
     }
+    if (s.restricted) {
+      loadError.value = 'Stamp ini cuma buat mutual pembuatnya.'
+      return
+    }
     stamp.value = s
-    replies.value = r
+    replies.value = await fetchStampReplies(stampId.value)
   } catch (error) {
     loadError.value = error.message
   } finally {
@@ -163,15 +188,24 @@ function openProfile(userId) {
               loading="lazy"
             />
 
-            <button
-              type="button"
-              class="mt-3 inline-flex items-center gap-1.5 rounded-full bg-kenalan-50 px-2.5 py-1 text-[11px] font-semibold text-kenalan-700 transition hover:bg-kenalan-100 active:scale-95"
-              aria-label="Lihat lokasi di peta"
-              @click="locationOpen = true"
-            >
-              <MapPin class="h-3 w-3" aria-hidden="true" />
-              {{ where }}
-            </button>
+            <div class="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                class="inline-flex items-center gap-1.5 rounded-full bg-kenalan-50 px-2.5 py-1 text-[11px] font-semibold text-kenalan-700 transition hover:bg-kenalan-100 active:scale-95"
+                aria-label="Lihat lokasi di peta"
+                @click="locationOpen = true"
+              >
+                <MapPin class="h-3 w-3" aria-hidden="true" />
+                {{ where }}
+              </button>
+              <span
+                v-if="isMutualOnly"
+                class="inline-flex items-center gap-1.5 rounded-full bg-kenalan-100 px-2.5 py-1 text-[11px] font-semibold text-kenalan-700"
+              >
+                <Lock class="h-3 w-3" aria-hidden="true" />
+                Mutual aja
+              </span>
+            </div>
           </article>
 
           <div

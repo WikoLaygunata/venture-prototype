@@ -3,21 +3,24 @@
  * LocationStampCard — one Location Stamp in the feed, now a thread entry.
  *
  * The exact place is intentionally NOT shown. Instead the card surfaces the
- * author's free-text `location_label` and an approximate `distance_m` from the
- * viewer. Stamps expire after 24h, carry an optional image, and can be opened
- * as a thread to read/post replies.
+ * author's free-text `location_label` plus the real distance from the viewer
+ * (computed from `viewerCoords` -> the stamp's coords). Without the viewer's
+ * location we show a neutral "lihat di peta" instead of a fake number. Stamps
+ * expire after 24h, carry an optional image, and open as a thread.
  */
 import { computed } from 'vue'
-import { Clock, MapPin, MessageCircle, Send, Trash2 } from 'lucide-vue-next'
+import { Clock, Lock, MapPin, MessageCircle, Send, Trash2 } from 'lucide-vue-next'
 import UserAvatar from '@/components/UserAvatar.vue'
 import ColorCodeBadge from '@/components/ColorCodeBadge.vue'
-import { distanceLabel, expiresIn, timeAgo } from '@/lib/time'
+import { distanceLabel, expiresIn, haversineMeters, timeAgo } from '@/lib/time'
 
 const props = defineProps({
   stamp: { type: Object, required: true },
   /** Renders the delete action instead of PING when the stamp is yours. */
   isOwn: { type: Boolean, default: false },
   busy: { type: Boolean, default: false },
+  /** Viewer's { lat, lng } for a real distance, or null when location is off. */
+  viewerCoords: { type: Object, default: null },
 })
 
 defineEmits(['ping', 'delete', 'open-profile', 'open-thread', 'open-location'])
@@ -26,10 +29,21 @@ const profile = computed(() => props.stamp.profile ?? {})
 const remaining = computed(() => expiresIn(props.stamp.created_at))
 const where = computed(() => {
   const label = props.stamp.location_label?.trim()
-  const dist = distanceLabel(props.stamp.distance_m)
-  return label ? `${label} · ${dist}` : dist
+  let dist
+  if (props.isOwn) {
+    dist = label ? '' : 'Lokasi stamp kamu'
+  } else if (props.viewerCoords && props.stamp.lat != null) {
+    dist = distanceLabel(
+      haversineMeters(props.viewerCoords, { lat: props.stamp.lat, lng: props.stamp.lng }),
+    )
+  } else {
+    dist = 'lihat di peta'
+  }
+  if (label && dist) return `${label} · ${dist}`
+  return label || dist
 })
 const replyCount = computed(() => props.stamp.reply_count ?? 0)
+const isMutualOnly = computed(() => (props.stamp.audience ?? 'public') === 'mutual')
 </script>
 
 <template>
@@ -90,6 +104,14 @@ const replyCount = computed(() => props.stamp.reply_count ?? 0)
       >
         <Clock class="h-3 w-3" aria-hidden="true" />
         hangus dalam {{ remaining }}
+      </span>
+
+      <span
+        v-if="isMutualOnly"
+        class="inline-flex items-center gap-1.5 rounded-full bg-kenalan-100 px-2.5 py-1 text-[11px] font-semibold text-kenalan-700"
+      >
+        <Lock class="h-3 w-3" aria-hidden="true" />
+        Mutual aja
       </span>
     </div>
 

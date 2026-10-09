@@ -5,7 +5,7 @@
  */
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { LoaderCircle, Save, Upload, X } from 'lucide-vue-next'
+import { Check, ChevronDown, LoaderCircle, Save, Shuffle, Upload, X } from 'lucide-vue-next'
 
 import AppHeader from '@/components/AppHeader.vue'
 import ColorCodePicker from '@/components/ColorCodePicker.vue'
@@ -13,6 +13,7 @@ import StateBlock from '@/components/StateBlock.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 
 import { fetchProfile, updateProfile } from '@/lib/api'
+import { AVATAR_PRESETS, isPresetAvatar, randomAvatar } from '@/lib/avatars'
 import { getColorCode } from '@/lib/colorCodes'
 import {
   SOCIAL_NETWORKS,
@@ -47,6 +48,30 @@ const form = reactive({
 
 const socialNetworks = SOCIAL_NETWORKS
 const visibilityOptions = SOCIAL_VISIBILITY_OPTIONS
+const avatarPresets = AVATAR_PRESETS
+
+/** Whether the avatar gallery is expanded. Collapsed by default to save space. */
+const galleryOpen = ref(false)
+
+/** Pick a gallery avatar — just swaps the stored avatar_url. */
+function pickPreset(url) {
+  form.avatar_url = url
+}
+
+/** "Acak" shortcut: land on a random gallery avatar. */
+function shufflePreset() {
+  form.avatar_url = randomAvatar()
+}
+
+/** Highlight the gallery tile that matches the current selection. */
+function isSelectedPreset(url) {
+  return form.avatar_url === url
+}
+
+/** True when the user uploaded a custom photo (not one of our presets). */
+const hasCustomPhoto = computed(
+  () => Boolean(form.avatar_url) && !isPresetAvatar(form.avatar_url),
+)
 
 onMounted(async () => {
   try {
@@ -239,7 +264,7 @@ async function save() {
                 <div class="min-w-0 flex-1 space-y-2">
                   <label class="btn-secondary w-full cursor-pointer !py-2.5 !text-[13px]">
                     <Upload class="h-4 w-4" aria-hidden="true" />
-                    {{ form.avatar_url ? 'Ganti foto' : 'Upload foto' }}
+                    {{ hasCustomPhoto ? 'Ganti foto' : 'Upload foto sendiri' }}
                     <input type="file" accept="image/*" class="sr-only" @change="onPickAvatar" />
                   </label>
                   <button
@@ -256,6 +281,75 @@ async function save() {
               <p class="mt-1.5 text-[11px] leading-relaxed text-slate-400">
                 Prototype: foto disimpan sementara di memori (belum ke server). Maks 5MB.
               </p>
+            </div>
+
+            <!-- avatar gallery: pilih tanpa harus upload foto pribadi -->
+            <div class="rounded-2xl border border-slate-100 bg-white shadow-sm">
+              <button
+                type="button"
+                class="flex w-full items-center justify-between gap-2 px-4 py-3"
+                :aria-expanded="galleryOpen"
+                aria-controls="avatar-gallery"
+                @click="galleryOpen = !galleryOpen"
+              >
+                <span class="text-sm font-bold text-slate-800">Atau pilih avatar</span>
+                <ChevronDown
+                  class="h-4 w-4 shrink-0 text-slate-400 transition-transform"
+                  :class="galleryOpen ? 'rotate-180' : ''"
+                  aria-hidden="true"
+                />
+              </button>
+
+              <div v-show="galleryOpen" id="avatar-gallery" class="px-4 pb-4">
+                <div class="mb-2.5 flex justify-end">
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 text-[11px] font-bold text-kenalan-600"
+                    @click="shufflePreset"
+                  >
+                    <Shuffle class="h-3.5 w-3.5" aria-hidden="true" />
+                    Acak
+                  </button>
+                </div>
+                <div
+                  class="grid grid-cols-4 gap-2.5"
+                  role="radiogroup"
+                  aria-label="Pilih avatar"
+                >
+                  <button
+                    v-for="avatar in avatarPresets"
+                    :key="avatar.id"
+                    type="button"
+                    role="radio"
+                    :aria-checked="isSelectedPreset(avatar.url)"
+                    :aria-label="`Avatar ${avatar.id}`"
+                    class="relative aspect-square overflow-hidden rounded-2xl border-2 bg-slate-50 transition"
+                    :class="
+                      isSelectedPreset(avatar.url)
+                        ? 'border-kenalan-500 ring-2 ring-kenalan-200'
+                        : 'border-transparent hover:border-slate-200'
+                    "
+                    @click="pickPreset(avatar.url)"
+                  >
+                    <img
+                      :src="avatar.url"
+                      alt=""
+                      class="h-full w-full object-cover"
+                      loading="lazy"
+                    />
+                    <span
+                      v-if="isSelectedPreset(avatar.url)"
+                      class="absolute bottom-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-kenalan-500 text-white shadow"
+                      aria-hidden="true"
+                    >
+                      <Check class="h-3 w-3" />
+                    </span>
+                  </button>
+                </div>
+                <p v-if="hasCustomPhoto" class="mt-2 text-[11px] leading-relaxed text-slate-400">
+                  Kamu lagi pakai foto sendiri. Pilih salah satu avatar di atas kalau mau pakai itu.
+                </p>
+              </div>
             </div>
 
             <div>

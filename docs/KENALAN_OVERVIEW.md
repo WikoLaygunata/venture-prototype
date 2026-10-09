@@ -34,6 +34,7 @@ Kenalan menghilangkan momen canggung "tukar IG" dengan satu tap fisik:
 | Framework | Vue 3 (`<script setup>`) |
 | Routing | Vue Router **5.3.1** (API identik gaya v4) |
 | Styling | Tailwind CSS v3 + palet pastel custom (`kenalan`, `mint`, `sunny`, `smoke`, `blush`) |
+| Peta | Leaflet 1.9 + tile OpenStreetMap (tanpa API key) |
 | Ikon | `lucide-vue-next` |
 | Backend | Supabase (`@supabase/supabase-js`) — Auth + Postgres + RLS + RPC |
 | State | Modul reaktif ringan (`src/stores/`), tanpa Pinia |
@@ -108,18 +109,36 @@ Edit Profil.
 ## 6. Fitur per Layar
 
 ### MapView `/map`
-- Mock **radar** dekoratif (cincin konsentris + titik stamp + "you are here").
-  Tidak ada lagi daftar spot populer atau peta spot bernama.
+- **Peta interaktif Leaflet** (tile OpenStreetMap, tanpa API key): bisa
+  geser/zoom/scroll. Tile sedikit di-desaturasi biar pin brand menonjol. Tiap
+  stamp jadi **marker berwarna** (warna = Color Code pembuat; ikon 🔒 untuk
+  mutual-only) yang bisa diklik → popup → **Buka thread**. Marker **"lokasiku"**
+  (biru berdenyut) muncul kalau geolocation diaktifkan lewat tombol "Lokasiku".
+  Ada tombol **extend** (ikon Expand) yang membuka peta **fullscreen** dalam
+  frame (overlay z-40, di bawah toast). Komponen: `components/StampMap.vue`.
+- Catatan: atribusi OSM **sengaja tidak dihapus** (syarat lisensi tile ODbL),
+  tapi diperkecil & dibikin samar + prefix "Leaflet" dihilangkan. Z-index semua
+  pane/kontrol Leaflet dibatasi (≤2) di dalam container `z-0` supaya peta tidak
+  pernah menimpa modal/BottomSheet.
 - Feed **"Stamps Around You"** (24 jam terakhir). Tiap kartu bisa dibuka jadi
-  thread, bisa di-PING, dan menampilkan **keterangan lokasi + perkiraan jarak**
-  (bukan nama tempat).
-- **Badge lokasi bisa diklik** → buka **StampLocationModal**: peta mini radar
-  yang menaruh titik stamp sesuai jarak + arah (`distance_m` + `bearing_deg`),
-  dengan **titik kamu di tengah**. Kalau kamu aktifkan lokasi (geolocation),
+  thread, bisa di-PING, dan menampilkan **keterangan lokasi + jarak nyata**
+  (dihitung haversine dari lokasimu ke koordinat stamp; kalau lokasi belum
+  diaktifkan tampil "lihat di peta", bukan angka palsu). Stamp sendiri tak
+  menampilkan jarak. Perhitungan ini dipakai sama di feed card, thread, dan
+  StampLocationModal.
+- **Badge lokasi bisa diklik** → buka **StampLocationModal**: peta mini Leaflet
+  (`readonly`) berisi marker stamp + marker kamu, plus ringkasan jarak + arah
+  (`distance_m` + `bearing_deg`). Kalau kamu aktifkan lokasi (geolocation),
   titikmu jadi biru + berdenyut dan muncul petunjuk arah ("ke arah Timur Laut").
-  Modal yang sama dipakai di StampThreadView.
+  Modal yang sama dipakai di StampThreadView — **sekarang pakai peta Leaflet
+  betulan** (StampMap mode `readonly`), bukan radar statis lagi.
 - **FAB "+ Stamp Location"** → form: pesan, **keterangan lokasi** (free-text +
-  chip saran), dan **foto opsional** (preview + hapus).
+  chip saran), **foto opsional** (preview + hapus), dan **audiens**
+  (**Publik / Mutual aja**, default Publik). Pilihan audiens **diingat di
+  localStorage** (`kenalan.stampAudience`) jadi nggak perlu pilih tiap kali.
+- Stamp **mutual-only** cuma muncul di feed/thread untuk pembuatnya + orang yang
+  sudah mutualan dengannya; kartu menampilkan badge 🔒 "Mutual aja". Membuka
+  thread stamp mutual-only tanpa hak → pesan "cuma buat mutual pembuatnya".
 
 ### StampThreadView `/stamp/:id`
 - Stamp asli di atas (pesan, foto, lokasi+jarak), lalu daftar **balasan**, dengan
@@ -202,8 +221,13 @@ Edit Profil.
   hasil upload (demo).
 - `nfc_tokens` — token keychain (unclaimed/claimed).
 - `location_stamps` — **tanpa** `spot_id`; punya `location_label`, `distance_m`,
-  `bearing_deg`, `image_url`, `expires_at` (24 jam). Beberapa stamp `u-raka`
-  sengaja berumur beberapa hari untuk mengisi History 30 hari.
+  `bearing_deg`, `lat`, `lng` (koordinat untuk peta Leaflet), `image_url`,
+  `audience` (`public`|`mutual`, default `public`), `expires_at` (24 jam).
+  Beberapa stamp `u-raka` sengaja berumur beberapa hari untuk mengisi History 30
+  hari; st-1 & st-5 di-seed `mutual` untuk demo. Semua di-seed di sekitar
+  `CAMPUS_CENTER` (konstanta di `mockData.js`).
+- Preferensi audiens stamp terakhir disimpan di localStorage key
+  `kenalan.stampAudience` (lihat `getStampAudiencePref`/`setStampAudiencePref`).
 - `stamp_replies` — balasan thread.
 - `pings`, `mutuals` — seperti sebelumnya (mutual = pasangan terurut).
 - `blocks`, `reports` — moderasi.
@@ -223,8 +247,8 @@ src/
 ├── stores/         auth, toast
 ├── router/         index.js (+ guards)
 ├── components/     BottomNav(4 tab), ColorCodeBadge/Picker, LocationStampCard,
-│                   StampLocationModal, BottomSheet, AppHeader, SocialLinks,
-│                   StateBlock, ToastHost, UserAvatar
+│                   StampMap(Leaflet), StampLocationModal, BottomSheet, AppHeader,
+│                   SocialLinks, StateBlock, ToastHost, UserAvatar
 ├── views/          Onboarding, Login, Profile, Map, StampThread, StampHistory,
 │                   Explore, Mutualan, EditProfile, Landing, NotFound
 └── App.vue         frame mobile tinggi-tetap (header + nav pinned)
@@ -267,7 +291,14 @@ Yang perlu ditambahkan/diubah di migrasi Supabase sebelum backend dipakai:
 - **History publik**: RLS `location_stamps` perlu mengizinkan non-pemilik
   membaca stamp milik user yang `stamp_history_public = true`.
 - `location_stamps`: hapus `spot_id`; tambah `location_label text`,
-  `distance_m numeric`, `bearing_deg numeric`, `image_url text`.
+  `distance_m numeric`, `bearing_deg numeric`, `lat double precision`,
+  `lng double precision`, `image_url text`,
+  `audience text default 'public' check (audience in ('public','mutual'))`.
+  (Untuk query "di dekat saya" yang efisien, pertimbangkan PostGIS `geography`
+  + index GiST alih-alih lat/lng mentah.)
+- **Audiens mutual-only**: idealnya ditegakkan di server (RLS/RPC yang
+  menyembunyikan stamp `mutual` dari non-mutual), bukan difilter di klien seperti
+  sekarang — kalau tidak, baris mutual-only tetap terkirim ke klien lewat network.
 - Tabel baru: `stamp_replies`, `blocks`, `reports`.
 - Hapus tabel `spots` (atau biarkan tak terpakai).
 - RLS: `stamp_replies` (baca user login; tulis pemilik baris);
@@ -297,4 +328,6 @@ Bilang saja kalau mau aku lanjut membuat migrasi SQL baru untuk menyinkronkan in
 
 ---
 
-_Catatan verifikasi: `npm run build` lolos (1756 modules, demo key `v6`). SQL belum dijalankan._
+_Catatan verifikasi: `npm run build` lolos (1760 modules, demo key `v8`). Peta
+Leaflet: atribusi OSM diperkecil (tetap ada demi lisensi), z-index di-cap biar
+tak menimpa modal, ada tombol fullscreen, modal thread pakai Leaflet. SQL belum dijalankan._

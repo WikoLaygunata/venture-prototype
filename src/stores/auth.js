@@ -10,6 +10,7 @@ import { supabase, isSupabaseConfigured } from '@/lib/supabase'
 import { demoDb, persistDemoDb, DEMO_CREDENTIALS, resetDemoDb } from '@/lib/mockData'
 import { fetchProfile, createProfile } from '@/lib/api'
 import { DEFAULT_COLOR_CODE } from '@/lib/colorCodes'
+import { defaultAvatarFor } from '@/lib/avatars'
 
 const userId = ref(null)
 const profile = ref(null)
@@ -132,9 +133,8 @@ export async function signUp({
       id,
       username,
       full_name: fullName,
-      avatar_url: `https://api.dicebear.com/9.x/notionists-neutral/svg?seed=${encodeURIComponent(
-        fullName || normalized,
-      )}&backgroundColor=ddd6fe,fce7f3,d1fae5,fef3c7&radius=50`,
+      // Pre-pick one of the gallery avatars so a new profile is never blank.
+      avatar_url: defaultAvatarFor(username || fullName || normalized),
       faculty,
       major,
       batch: String(new Date().getFullYear()),
@@ -171,6 +171,7 @@ export async function signUp({
       id: newUserId,
       username,
       full_name: fullName,
+      avatar_url: defaultAvatarFor(username || fullName || email),
       faculty,
       major,
       bio,

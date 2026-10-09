@@ -13,7 +13,7 @@ import {
   persistDemoDb,
   demoId,
   fakeDelay,
-  randomDistance,
+  CAMPUS_CENTER,
   MAX_PENDING_PINGS,
 } from './mockData'
 import { isoSince, isFresh, isWithin, STAMP_HISTORY_MS } from './time'
@@ -39,6 +39,28 @@ function blockedIdsFor(userId) {
     if (b.blocked_id === userId) set.add(b.blocker_id)
   }
   return set
+}
+
+/** Ids the given user has mutualan with (demo mode). */
+function mutualIdsFor(userId) {
+  const set = new Set()
+  for (const m of demoDb.mutuals) {
+    if (m.user_a_id === userId) set.add(m.user_b_id)
+    if (m.user_b_id === userId) set.add(m.user_a_id)
+  }
+  return set
+}
+
+/**
+ * Can `viewerId` see a stamp given its audience?
+ *   public  -> everyone
+ *   mutual  -> only the author or someone the author has mutualan with
+ */
+function canViewStamp(stamp, viewerId, mutualSet) {
+  if ((stamp.audience ?? 'public') === 'public') return true
+  if (!viewerId) return false
+  if (stamp.user_id === viewerId) return true
+  return mutualSet.has(stamp.user_id)
 }
 
 /**
@@ -267,11 +289,12 @@ function decorateStamp(s) {
  * The physical place is never exposed — only the author's `location_label` and
  * a `distance_m` from the viewer.
  */
-export async function fetchRecentStamps() {
+export async function fetchRecentStamps(viewerId = null) {
   if (!isSupabaseConfigured) {
     await fakeDelay()
+    const mutualSet = mutualIdsFor(viewerId)
     return demoDb.location_stamps
-      .filter((s) => isFresh(s.created_at))
+      .filter((s) => isFresh(s.created_at) && canViewStamp(s, viewerId, mutualSet))
       .sort(byNewest)
       .map(decorateStamp)
   }
@@ -284,20 +307,31 @@ export async function fetchRecentStamps() {
 
   if (error) throw new Error(`Gagal memuat stamp: ${error.message}`)
 
-  // PostgREST returns the aggregate as `[{ count }]`; flatten it.
-  return (data ?? []).map((s) => ({
-    ...s,
-    reply_count: Array.isArray(s.reply_count) ? (s.reply_count[0]?.count ?? 0) : s.reply_count,
-  }))
+  // Mutual-only stamps are filtered client-side here; a production backend
+  // should enforce this with RLS/RPC so hidden rows never leave the server.
+  const mutualIds = viewerId ? new Set((await fetchMutuals(viewerId)).map((p) => p.id)) : new Set()
+
+  return (data ?? [])
+    .filter((s) => canViewStamp(s, viewerId, mutualIds))
+    .map((s) => ({
+      ...s,
+      reply_count: Array.isArray(s.reply_count) ? (s.reply_count[0]?.count ?? 0) : s.reply_count,
+    }))
 }
 
-export async function fetchStamp(stampId) {
+/**
+ * A single stamp (for its thread). Returns `{ restricted: true }` instead of the
+ * row when the stamp is mutual-only and the viewer isn't allowed to see it.
+ */
+export async function fetchStamp(stampId, viewerId = null) {
   if (!stampId) return null
 
   if (!isSupabaseConfigured) {
     await fakeDelay(160)
     const found = demoDb.location_stamps.find((s) => s.id === stampId)
-    return found ? decorateStamp(found) : null
+    if (!found) return null
+    if (!canViewStamp(found, viewerId, mutualIdsFor(viewerId))) return { restricted: true }
+    return decorateStamp(found)
   }
 
   const { data, error } = await supabase
@@ -307,6 +341,12 @@ export async function fetchStamp(stampId) {
     .maybeSingle()
 
   if (error) throw new Error(`Gagal memuat stamp: ${error.message}`)
+  if (!data) return null
+
+  if ((data.audience ?? 'public') === 'mutual' && viewerId && data.user_id !== viewerId) {
+    const allowed = await isMutualWith(viewerId, data.user_id)
+    if (!allowed) return { restricted: true }
+  }
   return data
 }
 
@@ -340,9 +380,29 @@ export async function fetchStampHistory(userId, windowMs = STAMP_HISTORY_MS) {
   }))
 }
 
-export async function createStamp({ userId, message, locationLabel = '', imageUrl = '', distanceM = 0 }) {
+export async function createStamp({
+  userId,
+  message,
+  locationLabel = '',
+  imageUrl = '',
+  distanceM = 0,
+  audience = 'public',
+  lat = null,
+  lng = null,
+}) {
   const now = new Date()
   const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+  const safeAudience = audience === 'mutual' ? 'mutual' : 'public'
+
+  // Use the user's real coords when geolocation gave us some; otherwise fan the
+  // stamp out a little around the campus center so the map isn't a single pile.
+  const coords =
+    lat != null && lng != null
+      ? { lat, lng }
+      : {
+          lat: CAMPUS_CENTER.lat + (Math.random() - 0.5) * 0.004,
+          lng: CAMPUS_CENTER.lng + (Math.random() - 0.5) * 0.004,
+        }
 
   if (!isSupabaseConfigured) {
     const row = {
@@ -352,6 +412,9 @@ export async function createStamp({ userId, message, locationLabel = '', imageUr
       image_url: imageUrl,
       distance_m: 0, // it's your own stamp -> zero distance from you
       bearing_deg: 0,
+      lat: coords.lat,
+      lng: coords.lng,
+      audience: safeAudience,
       message,
       created_at: now.toISOString(),
       expires_at: expiresAt.toISOString(),
@@ -370,6 +433,9 @@ export async function createStamp({ userId, message, locationLabel = '', imageUr
       location_label: locationLabel,
       image_url: imageUrl || null,
       distance_m: distanceM,
+      lat: coords.lat,
+      lng: coords.lng,
+      audience: safeAudience,
       expires_at: expiresAt.toISOString(),
     })
     .select('*, profile:profiles(*)')

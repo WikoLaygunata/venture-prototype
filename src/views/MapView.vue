@@ -14,17 +14,31 @@
  */
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ImagePlus, LoaderCircle, MapPin, Plus, Radar, RefreshCw, Send, X } from 'lucide-vue-next'
+import {
+  Expand,
+  ImagePlus,
+  LoaderCircle,
+  LocateFixed,
+  MapPin,
+  Plus,
+  Radar,
+  RefreshCw,
+  Send,
+  X,
+} from 'lucide-vue-next'
 
 import AppHeader from '@/components/AppHeader.vue'
 import BottomSheet from '@/components/BottomSheet.vue'
 import ColorCodeBadge from '@/components/ColorCodeBadge.vue'
 import LocationStampCard from '@/components/LocationStampCard.vue'
 import StampLocationModal from '@/components/StampLocationModal.vue'
+import StampMap from '@/components/StampMap.vue'
 import StateBlock from '@/components/StateBlock.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
 
 import { createStamp, deleteStamp, fetchRecentStamps, sendPing } from '@/lib/api'
+import { getStampAudiencePref, setStampAudiencePref } from '@/lib/mockData'
+import { useGeolocation } from '@/lib/useGeolocation'
 import { currentProfile, currentUserId } from '@/stores/auth'
 import { toast } from '@/stores/toast'
 
@@ -38,7 +52,7 @@ async function load() {
   loading.value = true
   loadError.value = ''
   try {
-    stamps.value = await fetchRecentStamps()
+    stamps.value = await fetchRecentStamps(currentUserId.value)
   } catch (error) {
     loadError.value = error.message
   } finally {
@@ -54,11 +68,26 @@ const peopleNearby = computed(() => {
   return ids.size
 })
 
+/* --------------------------------------------------------------- geolocation */
+
+const { status: geoStatus, coords: geoCoords, error: geoError, request: requestGeo } =
+  useGeolocation()
+
+const userCoords = computed(() =>
+  geoCoords.value ? { lat: geoCoords.value.lat, lng: geoCoords.value.lng } : null,
+)
+const geoActive = computed(() => geoStatus.value === 'active')
+
 /* ------------------------------------------------------------ create a stamp */
 
 const stampSheetOpen = ref(false)
-const stampForm = ref({ message: '', locationLabel: '', imageUrl: '' })
+const stampForm = ref({ message: '', locationLabel: '', imageUrl: '', audience: 'public' })
 const savingStamp = ref(false)
+
+const AUDIENCE_OPTIONS = [
+  { value: 'public', label: 'Publik', hint: 'Semua orang di sekitar bisa lihat' },
+  { value: 'mutual', label: 'Mutual aja', hint: 'Cuma yang sudah mutualan sama kamu' },
+]
 
 const LOCATION_HINTS = [
   'Deket kantin',
@@ -69,7 +98,8 @@ const LOCATION_HINTS = [
 ]
 
 function openStampSheet() {
-  stampForm.value = { message: '', locationLabel: '', imageUrl: '' }
+  // Default to whatever audience they last used, so they don't re-pick each time.
+  stampForm.value = { message: '', locationLabel: '', imageUrl: '', audience: getStampAudiencePref() }
   stampSheetOpen.value = true
 }
 
@@ -106,10 +136,19 @@ async function submitStamp() {
       message: stampForm.value.message.trim(),
       locationLabel: stampForm.value.locationLabel.trim(),
       imageUrl: stampForm.value.imageUrl,
+      audience: stampForm.value.audience,
+      lat: userCoords.value?.lat ?? null,
+      lng: userCoords.value?.lng ?? null,
     })
+    // Remember the choice for next time.
+    setStampAudiencePref(stampForm.value.audience)
     stamps.value = [created, ...stamps.value]
     stampSheetOpen.value = false
-    toast.success('Stamp kamu tayang! Aktif selama 24 jam ⏱️')
+    toast.success(
+      stampForm.value.audience === 'mutual'
+        ? 'Stamp tayang buat mutual kamu! Aktif 24 jam ⏱️'
+        : 'Stamp kamu tayang! Aktif selama 24 jam ⏱️',
+    )
   } catch (error) {
     toast.error(error.message)
   } finally {
@@ -162,6 +201,15 @@ function openThread(stamp) {
   router.push({ name: 'stamp-thread', params: { id: stamp.id } })
 }
 
+/* ----------------------------------------------------------- fullscreen map */
+
+const mapExpanded = ref(false)
+
+function openThreadFromExpanded(stamp) {
+  mapExpanded.value = false
+  openThread(stamp)
+}
+
 /* ------------------------------------------------------------- location map */
 
 const locationStamp = ref(null)
@@ -175,6 +223,8 @@ function openProfile(userId) {
   if (userId === currentUserId.value) router.push({ name: 'profile' })
   else router.push({ name: 'user-profile', params: { user_id: userId } })
 }
+
+
 </script>
 
 <template>
@@ -193,47 +243,48 @@ function openProfile(userId) {
 
     <div class="screen-scroll">
       <StateBlock :loading="loading" :error="loadError" loading-text="Memuat stamp…" @retry="load">
-        <!-- ================================================= mock radar map -->
+        <!-- ============================================= interactive map -->
         <section class="px-5 pt-4">
-          <div
-            class="relative h-44 overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-kenalan-50 via-sky-50 to-emerald-50"
-            role="img"
-            aria-label="Peta sekitar dengan titik posisimu di tengah"
-          >
-            <!-- concentric radar rings -->
-            <div class="absolute inset-0 flex items-center justify-center" aria-hidden="true">
-              <span class="absolute h-20 w-20 rounded-full border border-kenalan-200" />
-              <span class="absolute h-36 w-36 rounded-full border border-kenalan-200/70" />
-              <span class="absolute h-52 w-52 rounded-full border border-kenalan-200/40" />
+          <div class="relative h-72 overflow-hidden rounded-3xl border border-slate-200 shadow-card">
+            <StampMap :stamps="stamps" :user-coords="userCoords" @open="openThread" />
+
+            <!-- controls overlay the map, top-right (z-10 keeps them above the
+                 map's capped panes but below app modals) -->
+            <div class="absolute right-2.5 top-2.5 z-10 flex items-center gap-1.5">
+              <button
+                v-if="!geoActive"
+                type="button"
+                class="inline-flex items-center gap-1.5 rounded-full bg-white/95 px-3 py-1.5 text-[11px] font-bold text-kenalan-700 shadow-md backdrop-blur transition hover:bg-white disabled:opacity-60"
+                :disabled="geoStatus === 'prompting' || geoStatus === 'unsupported'"
+                @click="requestGeo"
+              >
+                <LocateFixed class="h-3.5 w-3.5" aria-hidden="true" />
+                {{ geoStatus === 'prompting' ? 'Mencari…' : 'Lokasiku' }}
+              </button>
+              <span
+                v-else
+                class="inline-flex items-center gap-1.5 rounded-full bg-sky-500/95 px-3 py-1.5 text-[11px] font-bold text-white shadow-md"
+              >
+                <LocateFixed class="h-3.5 w-3.5" aria-hidden="true" />
+                Lokasi aktif
+              </span>
+
+              <button
+                type="button"
+                class="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/95 text-slate-600 shadow-md backdrop-blur transition hover:bg-white active:scale-95"
+                aria-label="Perbesar peta"
+                @click="mapExpanded = true"
+              >
+                <Expand class="h-4 w-4" aria-hidden="true" />
+              </button>
             </div>
-
-            <!-- floating stamp dots, placed pseudo-randomly by index -->
-            <span
-              v-for="(stamp, i) in stamps.slice(0, 8)"
-              :key="stamp.id"
-              class="absolute h-2.5 w-2.5 rounded-full bg-kenalan-500 ring-4 ring-white/70"
-              :style="{
-                left: `${18 + ((i * 97) % 64)}%`,
-                top: `${20 + ((i * 61) % 56)}%`,
-              }"
-              aria-hidden="true"
-            />
-
-            <!-- you are here -->
-            <div
-              class="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
-              aria-hidden="true"
-            >
-              <span class="absolute inset-0 m-auto h-3 w-3 animate-pulse-ring rounded-full bg-kenalan-400" />
-              <span class="relative block h-3 w-3 rounded-full bg-kenalan-500 ring-4 ring-white" />
-            </div>
-
-            <p
-              class="absolute bottom-2.5 left-3 rounded-full bg-white/80 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-500 backdrop-blur"
-            >
-              Perkiraan posisi · Contoh perpustakaan
-            </p>
           </div>
+          <p v-if="geoError" class="mt-1.5 px-1 text-[11px] font-semibold text-blush-deep">
+            {{ geoError }}
+          </p>
+          <p v-else class="mt-1.5 px-1 text-[11px] text-slate-400">
+            Geser buat jelajah peta. Ketuk pin buat buka thread stamp-nya.
+          </p>
         </section>
 
         <!-- ======================================== stamps around you (24h) -->
@@ -276,6 +327,7 @@ function openProfile(userId) {
                 :key="stamp.id"
                 :stamp="stamp"
                 :is-own="stamp.user_id === currentUserId"
+                :viewer-coords="userCoords"
                 @ping="openPing"
                 @delete="removeStamp"
                 @open-profile="openProfile"
@@ -298,6 +350,51 @@ function openProfile(userId) {
       <Plus class="h-4 w-4" stroke-width="3" aria-hidden="true" />
       Stamp Location
     </button>
+
+    <!-- =========================================== fullscreen map overlay -->
+    <!-- z-40 = same layer as BottomSheet, still below ToastHost (z-50) -->
+    <div v-if="mapExpanded" class="absolute inset-0 z-40 flex flex-col bg-white animate-fade-in">
+      <div
+        class="flex shrink-0 items-center justify-between gap-3 px-4 pt-[calc(env(safe-area-inset-top)+0.75rem)] pb-3"
+      >
+        <div class="min-w-0">
+          <p class="text-sm font-extrabold tracking-tight text-slate-800">Peta Stamp</p>
+          <p class="text-[11px] text-slate-400">{{ stamps.length }} stamp aktif di sekitarmu</p>
+        </div>
+        <button
+          type="button"
+          class="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 active:scale-95"
+          aria-label="Tutup peta"
+          @click="mapExpanded = false"
+        >
+          <X class="h-5 w-5" aria-hidden="true" />
+        </button>
+      </div>
+
+      <div class="relative flex-1">
+        <StampMap :stamps="stamps" :user-coords="userCoords" @open="openThreadFromExpanded" />
+
+        <div class="absolute right-3 top-3 z-10">
+          <button
+            v-if="!geoActive"
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-full bg-white/95 px-3 py-1.5 text-[11px] font-bold text-kenalan-700 shadow-md backdrop-blur transition hover:bg-white disabled:opacity-60"
+            :disabled="geoStatus === 'prompting' || geoStatus === 'unsupported'"
+            @click="requestGeo"
+          >
+            <LocateFixed class="h-3.5 w-3.5" aria-hidden="true" />
+            {{ geoStatus === 'prompting' ? 'Mencari…' : 'Lokasiku' }}
+          </button>
+          <span
+            v-else
+            class="inline-flex items-center gap-1.5 rounded-full bg-sky-500/95 px-3 py-1.5 text-[11px] font-bold text-white shadow-md"
+          >
+            <LocateFixed class="h-3.5 w-3.5" aria-hidden="true" />
+            Lokasi aktif
+          </span>
+        </div>
+      </div>
+    </div>
 
     <!-- =============================================== stamp form (modal) -->
     <BottomSheet
@@ -349,6 +446,33 @@ function openProfile(userId) {
           </div>
           <p class="mt-1.5 text-[11px] leading-relaxed text-slate-400">
             Alamat persis nggak ditampilkan ke orang lain — mereka cuma lihat perkiraan jarak.
+          </p>
+        </div>
+
+        <!-- audience: who can see this stamp -->
+        <div>
+          <span class="field-label">Siapa yang bisa lihat</span>
+          <div class="flex gap-1 rounded-2xl bg-slate-100 p-1" role="radiogroup" aria-label="Audiens stamp">
+            <button
+              v-for="opt in AUDIENCE_OPTIONS"
+              :key="opt.value"
+              type="button"
+              role="radio"
+              :aria-checked="stampForm.audience === opt.value"
+              class="flex-1 rounded-xl py-2 text-[12px] font-bold transition"
+              :class="
+                stampForm.audience === opt.value
+                  ? 'bg-white text-kenalan-600 shadow-sm'
+                  : 'text-slate-500'
+              "
+              @click="stampForm.audience = opt.value"
+            >
+              {{ opt.label }}
+            </button>
+          </div>
+          <p class="mt-1.5 text-[11px] leading-relaxed text-slate-400">
+            {{ AUDIENCE_OPTIONS.find((o) => o.value === stampForm.audience)?.hint }}
+            Pilihan ini diingat untuk stamp berikutnya.
           </p>
         </div>
 
