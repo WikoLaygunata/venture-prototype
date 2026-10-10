@@ -41,7 +41,7 @@ const isSmall = computed(() => props.size === 'sm')
       status.bg,
       status.border,
       status.text,
-      isSmall ? 'px-2.5 py-1 text-[8px]' : 'px-3.5 py-2 text-xs',
+      isSmall ? 'px-2.5 py-1 text-[8px]' : 'px-3 py-1.5 text-[10px]',
       interactive ? 'active:scale-[0.97] hover:brightness-[0.98] cursor-pointer' : '',
     ]"
     @click="interactive && $emit('click')"

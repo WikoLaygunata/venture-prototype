@@ -748,6 +748,38 @@ export async function unblockUser(blockerId, blockedId) {
   return true
 }
 
+/**
+ * Everyone the given user has blocked, newest first, decorated with the blocked
+ * person's profile so Settings can render a list with an "unblock" action.
+ */
+export async function fetchBlockedUsers(blockerId) {
+  if (!blockerId) return []
+
+  if (!isSupabaseConfigured) {
+    await fakeDelay()
+    return demoDb.blocks
+      .filter((b) => b.blocker_id === blockerId)
+      .sort(byNewest)
+      .map((b) => {
+        const profile = findProfile(b.blocked_id)
+        return profile ? { ...profile, blocked_at: b.created_at } : null
+      })
+      .filter(Boolean)
+  }
+
+  const { data, error } = await supabase
+    .from('blocks')
+    .select('created_at, blocked:profiles!blocks_blocked_id_fkey(*)')
+    .eq('blocker_id', blockerId)
+    .order('created_at', { ascending: false })
+
+  if (error) throw new Error(`Gagal memuat daftar blokir: ${error.message}`)
+
+  return (data ?? [])
+    .map((row) => (row.blocked ? { ...row.blocked, blocked_at: row.created_at } : null))
+    .filter(Boolean)
+}
+
 export async function isBlocked(blockerId, blockedId) {
   if (!blockerId || !blockedId) return false
 

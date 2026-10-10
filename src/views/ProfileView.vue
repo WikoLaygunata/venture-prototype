@@ -21,21 +21,25 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowRight,
   Ban,
+  BookOpen,
+  Building2,
+  CalendarDays,
   CheckCheck,
   Flag,
-  GraduationCap,
   Heart,
   HeartCrack,
   History,
+  Sparkles,
   LoaderCircle,
   LogOut,
   MoreVertical,
   Nfc,
   Pencil,
-  RefreshCw,
+  RotateCcw,
   Send,
   Settings,
   Share2,
+  ShieldOff,
   UserRound,
 } from 'lucide-vue-next'
 
@@ -49,6 +53,7 @@ import UserAvatar from '@/components/UserAvatar.vue'
 
 import {
   blockUser,
+  fetchBlockedUsers,
   fetchMutualCount,
   fetchProfile,
   hasPendingPing,
@@ -58,11 +63,12 @@ import {
   sendPing,
   setDiscoverable,
   setStampHistoryPublic,
+  unblockUser,
   updateColorCode,
 } from '@/lib/api'
 import { getColorCode } from '@/lib/colorCodes'
 import { isSupabaseConfigured } from '@/lib/supabase'
-import { currentProfile, currentUserId, refreshProfile, setProfile, signOut } from '@/stores/auth'
+import { currentProfile, currentUserId, setProfile, signOut } from '@/stores/auth'
 import { toast } from '@/stores/toast'
 
 const route = useRoute()
@@ -357,9 +363,43 @@ async function handleSignOut() {
   }
 }
 
-async function handleRefresh() {
+/* ----------------------------------------------------------- blocked users */
+
+const blockedOpen = ref(false)
+const blockedList = ref([])
+const blockedLoading = ref(false)
+const unblockingId = ref('')
+
+/** Open the "blocked users" sheet from Settings and load the list. */
+async function openBlocked() {
   settingsOpen.value = false
-  await Promise.all([load(), isSelf.value ? refreshProfile() : Promise.resolve()])
+  blockedOpen.value = true
+  await loadBlocked()
+}
+
+async function loadBlocked() {
+  blockedLoading.value = true
+  try {
+    blockedList.value = await fetchBlockedUsers(currentUserId.value)
+  } catch (error) {
+    toast.error(error.message)
+  } finally {
+    blockedLoading.value = false
+  }
+}
+
+async function handleUnblock(user) {
+  if (unblockingId.value) return
+  unblockingId.value = user.id
+  try {
+    await unblockUser(currentUserId.value, user.id)
+    blockedList.value = blockedList.value.filter((u) => u.id !== user.id)
+    toast.success(`Blokir ke @${user.username} dibuka.`)
+  } catch (error) {
+    toast.error(error.message)
+  } finally {
+    unblockingId.value = ''
+  }
 }
 </script>
 
@@ -413,32 +453,71 @@ async function handleRefresh() {
             />
 
             <div class="relative px-5 pt-14">
-              <UserAvatar :profile="profile" size="xl" ring class="mb-3" />
+              <div class="flex items-end justify-between gap-3">
+                <UserAvatar :profile="profile" size="xl" ring class="mb-3" />
+
+                <!-- mutualan count as a compact stat chip -->
+                <div class="mb-2 rounded-2xl bg-slate-50 px-3.5 py-2 text-center ring-1 ring-slate-100">
+                  <p class="text-lg font-extrabold leading-none text-slate-800">{{ mutualCount }}</p>
+                  <p class="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                    Mutualan
+                  </p>
+                </div>
+              </div>
 
               <h2 class="text-xl font-extrabold leading-tight tracking-tight text-slate-800">
                 {{ profile.full_name }}
               </h2>
               <p class="mt-0.5 text-sm text-slate-400">@{{ profile.username }}</p>
 
-              <div class="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
-                <span
-                  v-if="profile.major"
-                  class="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 font-semibold"
-                >
-                  <GraduationCap class="h-3.5 w-3.5" aria-hidden="true" />
-                  {{ profile.major }}
-                </span>
-                <span v-if="profile.faculty" class="rounded-full bg-slate-100 px-2.5 py-1 font-semibold">
-                  {{ profile.faculty }}
-                </span>
-                <span v-if="profile.batch" class="rounded-full bg-slate-100 px-2.5 py-1 font-semibold">
-                  Angkatan {{ profile.batch }}
-                </span>
-              </div>
-
-              <p v-if="profile.bio" class="mt-3.5 text-sm leading-relaxed text-slate-600">
+              <p v-if="profile.bio" class="mt-3 text-sm leading-relaxed text-slate-600">
                 {{ profile.bio }}
               </p>
+
+              <!-- academic identity: a clean icon list instead of scattered chips -->
+              <dl
+                v-if="profile.major || profile.faculty || profile.batch"
+                class="mt-4 divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm"
+              >
+                <div v-if="profile.major" class="flex items-center gap-3 px-4 py-3">
+                  <BookOpen class="h-4 w-4 shrink-0 text-kenalan-500" aria-hidden="true" />
+                  <dt class="sr-only">Jurusan</dt>
+                  <dd class="min-w-0 flex-1 truncate text-sm font-semibold text-slate-700">
+                    {{ profile.major }}
+                  </dd>
+                </div>
+                <div v-if="profile.faculty" class="flex items-center gap-3 px-4 py-3">
+                  <Building2 class="h-4 w-4 shrink-0 text-kenalan-500" aria-hidden="true" />
+                  <dt class="sr-only">Fakultas</dt>
+                  <dd class="min-w-0 flex-1 truncate text-sm font-semibold text-slate-700">
+                    {{ profile.faculty }}
+                  </dd>
+                </div>
+                <div v-if="profile.batch" class="flex items-center gap-3 px-4 py-3">
+                  <CalendarDays class="h-4 w-4 shrink-0 text-kenalan-500" aria-hidden="true" />
+                  <dt class="sr-only">Angkatan</dt>
+                  <dd class="min-w-0 flex-1 truncate text-sm font-semibold text-slate-700">
+                    Angkatan {{ profile.batch }}
+                  </dd>
+                </div>
+              </dl>
+
+              <!-- interests as proper tags -->
+              <div v-if="profile.interests?.length" class="mt-4">
+                <p class="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">
+                  <Sparkles class="h-3.5 w-3.5" aria-hidden="true" />
+                  Minat
+                </p>
+                <div class="flex flex-wrap gap-1.5">
+                  <span
+                    v-for="interest in profile.interests"
+                    :key="interest"
+                    class="rounded-full bg-kenalan-50 px-2.5 py-1 text-xs font-semibold text-kenalan-700 ring-1 ring-kenalan-100"
+                  >
+                    {{ interest }}
+                  </span>
+                </div>
+              </div>
 
               <!-- Color code: tappable only when it's your own profile -->
               <div class="mt-4">
@@ -452,16 +531,6 @@ async function handleRefresh() {
                   @click="openStatusSheet"
                 />
                 <p class="mt-2 text-xs leading-relaxed text-slate-400">{{ status.description }}</p>
-              </div>
-
-              <div class="mt-4 flex items-center gap-4 text-xs">
-                <span class="font-bold text-slate-700">
-                  {{ mutualCount }}
-                  <span class="font-medium text-slate-400">mutualan</span>
-                </span>
-                <span v-if="profile.interests?.length" class="truncate text-slate-400">
-                  Suka: {{ profile.interests.join(', ') }}
-                </span>
               </div>
             </div>
           </div>
@@ -794,9 +863,9 @@ async function handleRefresh() {
           <Pencil class="h-4 w-4" aria-hidden="true" />
           Edit profil
         </RouterLink>
-        <button type="button" class="btn-ghost w-full !justify-start !py-3.5" @click="handleRefresh">
-          <RefreshCw class="h-4 w-4" aria-hidden="true" />
-          Muat ulang data
+        <button type="button" class="btn-ghost w-full !justify-start !py-3.5" @click="openBlocked">
+          <ShieldOff class="h-4 w-4" aria-hidden="true" />
+          Pengguna diblokir
         </button>
         <button
           type="button"
@@ -807,6 +876,54 @@ async function handleRefresh() {
           Keluar dari akun
         </button>
       </div>
+    </BottomSheet>
+
+    <!-- =============================================== blocked users -->
+    <BottomSheet :open="blockedOpen" title="Pengguna diblokir" @close="blockedOpen = false">
+      <div v-if="blockedLoading" class="flex items-center justify-center py-10 text-slate-400">
+        <LoaderCircle class="h-6 w-6 animate-spin" aria-hidden="true" />
+      </div>
+
+      <div
+        v-else-if="!blockedList.length"
+        class="flex flex-col items-center gap-2 py-10 text-center"
+      >
+        <ShieldOff class="h-8 w-8 text-slate-300" aria-hidden="true" />
+        <p class="text-sm font-bold text-slate-600">Belum ada yang diblokir</p>
+        <p class="max-w-[16rem] text-xs leading-relaxed text-slate-400">
+          Orang yang kamu blokir bakal muncul di sini, lengkap dengan tombol buka blokir.
+        </p>
+      </div>
+
+      <ul v-else class="space-y-2">
+        <li
+          v-for="user in blockedList"
+          :key="user.id"
+          class="flex items-center gap-3 rounded-2xl border border-slate-100 bg-white p-3 shadow-sm"
+        >
+          <UserAvatar :profile="user" size="sm" />
+          <div class="min-w-0 flex-1">
+            <p class="truncate text-sm font-bold text-slate-800">
+              {{ user.full_name || user.username }}
+            </p>
+            <p class="truncate text-[11px] text-slate-400">@{{ user.username }}</p>
+          </div>
+          <button
+            type="button"
+            class="btn-secondary shrink-0 !px-3 !py-2 !text-[12px]"
+            :disabled="unblockingId === user.id"
+            @click="handleUnblock(user)"
+          >
+            <LoaderCircle
+              v-if="unblockingId === user.id"
+              class="h-3.5 w-3.5 animate-spin"
+              aria-hidden="true"
+            />
+            <RotateCcw v-else class="h-3.5 w-3.5" aria-hidden="true" />
+            Buka blokir
+          </button>
+        </li>
+      </ul>
     </BottomSheet>
   </div>
 </template>
