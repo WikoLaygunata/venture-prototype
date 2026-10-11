@@ -1,8 +1,9 @@
 <script setup>
 /**
- * App.vue — the phone frame.
+ * App.vue — the mobile app frame and standalone admin dashboard shell.
  *
- * Everything lives inside a fixed max-width column centred on a dark backdrop.
+ * Member views live inside a fixed max-width column centred on a dark backdrop;
+ * dashboard routes use the full viewport instead.
  * The frame is the positioning context for BottomNav, ToastHost and every
  * BottomSheet, so those use `absolute` and stay clipped inside the "device".
  * Scrolling happens in each view's `.screen-scroll` element, never on <body>.
@@ -18,13 +19,16 @@ import { currentUserId } from '@/stores/auth'
 
 const route = useRoute()
 
-const showNav = computed(() => !route.meta.hideNav && Boolean(currentUserId.value))
+const isDashboardRoute = computed(() => route.path.startsWith('/dashboard'))
+const showNav = computed(
+  () => !isDashboardRoute.value && !route.meta.hideNav && Boolean(currentUserId.value),
+)
 
 /* Pending PING count for the Mutualan tab badge. */
 const pendingPings = ref(0)
 
 async function refreshBadge() {
-  if (!currentUserId.value) {
+  if (isDashboardRoute.value || !currentUserId.value) {
     pendingPings.value = 0
     return
   }
@@ -43,21 +47,30 @@ watch(() => route.fullPath, refreshBadge)
 </script>
 
 <template>
-  <div class="h-[100dvh] bg-slate-900 flex justify-center items-center p-0 sm:p-4 overflow-hidden">
+  <div
+    class="overflow-hidden"
+    :class="isDashboardRoute
+      ? 'h-[100dvh] bg-[#f5f7f8]'
+      : 'flex h-[100dvh] items-center justify-center bg-slate-900 p-0 sm:p-4'"
+  >
     <div
-      class="w-full max-w-md sm:max-w-[22rem] bg-white h-[100dvh] sm:h-[844px] sm:max-h-[100dvh] sm:rounded-[40px] shadow-2xl relative flex flex-col overflow-hidden border-0 sm:border-4 border-slate-800"
+      v-if="isDashboardRoute"
+      class="h-full w-full"
+    >
+      <RouterView v-slot="{ Component }">
+        <component :is="Component" :key="route.fullPath" />
+      </RouterView>
+    </div>
+
+    <div
+      v-else
+      class="relative flex h-[100dvh] w-full max-w-md flex-col overflow-hidden border-0 bg-white shadow-2xl sm:h-[844px] sm:max-h-[100dvh] sm:max-w-[22rem] sm:rounded-[40px] sm:border-4 sm:border-slate-800"
     >
       <ToastHost />
 
-      <!--
-        The frame is a fixed-height flex column. Each view renders its own
-        AppHeader (pinned top) and BottomNav sits here (pinned bottom); only the
-        view's `.screen-scroll` region scrolls between them, so header + nav
-        stay put like a native app.
-      -->
+      <!-- Views own their scroll regions; the app header and bottom nav stay pinned. -->
       <RouterView v-slot="{ Component }">
-        <!-- key forces a clean remount between /profile and /user/:id -->
-        <component :is="Component" :key="route.fullPath" class="flex-1 min-h-0" />
+        <component :is="Component" :key="route.fullPath" class="min-h-0 flex-1" />
       </RouterView>
 
       <BottomNav v-if="showNav" :badge="pendingPings" />

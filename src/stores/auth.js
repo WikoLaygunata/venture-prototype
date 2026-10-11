@@ -7,14 +7,22 @@
  */
 import { computed, ref } from 'vue'
 import { supabase, isSupabaseConfigured } from '@/lib/supabase'
-import { demoDb, persistDemoDb, DEMO_CREDENTIALS, resetDemoDb } from '@/lib/mockData'
-import { fetchProfile, createProfile } from '@/lib/api'
+import {
+  demoDb,
+  persistDemoDb,
+  DEMO_CREDENTIALS,
+  getDemoPassword,
+  setDemoPassword,
+  resetDemoDb,
+} from '@/lib/mockData'
+import { claimNfcToken, fetchProfile, createProfile, fetchNfcToken } from '@/lib/api'
 import { DEFAULT_COLOR_CODE } from '@/lib/colorCodes'
 import { defaultAvatarFor } from '@/lib/avatars'
 
 const userId = ref(null)
 const profile = ref(null)
 const ready = ref(false)
+let demoResetEmail = ''
 
 export const isLoggedIn = computed(() => Boolean(userId.value))
 export const currentUserId = computed(() => userId.value)
@@ -80,10 +88,14 @@ export async function signIn({ email, password }) {
 
     // Demo mode accepts the seeded credentials, or any @kenalan.id address
     // that matches a seeded username (e.g. nadiakirana@kenalan.id).
+    const demoProfile = demoDb.profiles.find((p) => p.id === 'u-raka')
     const isDemoAccount =
-      normalized === DEMO_CREDENTIALS.email && password === DEMO_CREDENTIALS.password
+      normalized === (demoProfile?.admin_email ?? DEMO_CREDENTIALS.email) &&
+      password === getDemoPassword()
     const matchByUsername = demoDb.profiles.find(
-      (p) => `${p.username}@kenalan.id` === normalized && password === DEMO_CREDENTIALS.password,
+      (p) =>
+        (`${p.username}@kenalan.id` === normalized || p.admin_email === normalized) &&
+        password === getDemoPassword(),
     )
 
     if (!isDemoAccount && !matchByUsername) {
@@ -93,6 +105,8 @@ export async function signIn({ email, password }) {
     }
 
     const id = isDemoAccount ? 'u-raka' : matchByUsername.id
+    const matchedProfile = demoDb.profiles.find((item) => item.id === id)
+    if (matchedProfile?.is_banned) throw new Error('Akun ini sedang dinonaktifkan.')
     demoDb.session_user_id = id
     persistDemoDb()
     userId.value = id
@@ -114,6 +128,7 @@ export async function signIn({ email, password }) {
  * @returns {Promise<{userId:string, needsEmailConfirmation:boolean}>}
  */
 export async function signUp({
+  token,
   email,
   password,
   fullName,
@@ -122,6 +137,19 @@ export async function signUp({
   major = '',
   bio = '',
 }) {
+  const normalizedToken = String(token ?? '').trim().toUpperCase()
+  if (!normalizedToken) throw new Error('Aktivasi akun memerlukan token NFC yang valid.')
+  if (!/^[a-z0-9_.]{3,24}$/.test(String(username ?? ''))) {
+    throw new Error('Username harus 3–24 karakter: huruf kecil, angka, titik, atau garis bawah.')
+  }
+  if (String(fullName ?? '').trim().length < 3 || String(fullName).length > 80) {
+    throw new Error('Nama lengkap harus berisi 3–80 karakter.')
+  }
+  const tokenRecord = await fetchNfcToken(normalizedToken)
+  if (!tokenRecord || tokenRecord.status !== 'unclaimed') {
+    throw new Error('Token NFC tidak valid atau sudah diklaim.')
+  }
+
   if (!isSupabaseConfigured) {
     const normalized = String(email).trim().toLowerCase()
     if (demoDb.profiles.some((p) => p.username === username)) {
@@ -145,6 +173,13 @@ export async function signUp({
       linkedin: '',
       spotify: '',
     })
+    try {
+      await claimNfcToken(normalizedToken, id)
+    } catch (error) {
+      demoDb.profiles = demoDb.profiles.filter((profile) => profile.id !== id)
+      persistDemoDb()
+      throw error
+    }
 
     demoDb.session_user_id = id
     persistDemoDb()
@@ -156,7 +191,16 @@ export async function signUp({
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
-    options: { data: { full_name: fullName, username } },
+    options: {
+      data: {
+        full_name: fullName,
+        username,
+        nfc_token: normalizedToken,
+        faculty,
+        major,
+        bio,
+      },
+    },
   })
   if (error) throw new Error(translateAuthError(error.message))
 
@@ -184,6 +228,64 @@ export async function signUp({
   return { userId: newUserId, needsEmailConfirmation: !data.session }
 }
 
+export async function requestPasswordReset(email) {
+  const normalized = String(email ?? '').trim().toLowerCase()
+  if (!/\S+@\S+\.\S+/.test(normalized)) throw new Error('Masukkan alamat email yang valid.')
+
+  if (!isSupabaseConfigured) {
+    demoResetEmail = normalized
+    return
+  }
+
+  const { error } = await supabase.auth.resetPasswordForEmail(normalized, {
+    redirectTo: `${window.location.origin}/reset-password`,
+  })
+  if (error) throw new Error(translateAuthError(error.message))
+}
+
+export async function changePassword({ currentPassword, newPassword }) {
+  if (String(newPassword ?? '').length < 8) {
+    throw new Error('Password baru minimal 8 karakter.')
+  }
+
+  if (!isSupabaseConfigured) {
+    if (!userId.value) throw new Error('Silakan masuk terlebih dahulu.')
+    if (currentPassword !== getDemoPassword()) throw new Error('Password saat ini tidak cocok.')
+    setDemoPassword(newPassword)
+    return
+  }
+
+  const { data: currentUser, error: userError } = await supabase.auth.getUser()
+  if (userError) throw new Error(`Gagal memverifikasi akun: ${translateAuthError(userError.message)}`)
+  if (!currentUser.user?.email) throw new Error('Email akun tidak tersedia untuk verifikasi password.')
+  const { error: verifyError } = await supabase.auth.signInWithPassword({
+    email: currentUser.user.email,
+    password: currentPassword,
+  })
+  if (verifyError) throw new Error('Password saat ini tidak cocok.')
+  const { error } = await supabase.auth.updateUser({ password: newPassword })
+  if (error) throw new Error(translateAuthError(error.message))
+}
+
+export async function completePasswordReset(newPassword) {
+  if (String(newPassword ?? '').length < 8) {
+    throw new Error('Password baru minimal 8 karakter.')
+  }
+
+  if (!isSupabaseConfigured) {
+    if (!demoResetEmail) throw new Error('Simulasi pemulihan tidak dimulai. Minta link reset terlebih dahulu.')
+    setDemoPassword(newPassword)
+    demoResetEmail = ''
+    return
+  }
+
+  const { data, error: sessionError } = await supabase.auth.getSession()
+  if (sessionError) throw new Error(`Gagal memverifikasi sesi pemulihan: ${sessionError.message}`)
+  if (!data.session) throw new Error('Sesi pemulihan tidak valid atau sudah kedaluwarsa.')
+  const { error } = await supabase.auth.updateUser({ password: newPassword })
+  if (error) throw new Error(translateAuthError(error.message))
+}
+
 export async function signOut() {
   if (!isSupabaseConfigured) {
     demoDb.session_user_id = null
@@ -208,9 +310,12 @@ export function resetDemo() {
 
 function translateAuthError(message = '') {
   const m = message.toLowerCase()
+  if (m.includes('nfc_token_required')) return 'Pendaftaran harus dimulai dari token NFC yang valid.'
+  if (m.includes('nfc_token_invalid')) return 'Token NFC sudah digunakan atau tidak valid.'
+  if (m.includes('username_taken')) return 'Username ini sudah dipakai.'
   if (m.includes('invalid login credentials')) return 'Email atau password salah.'
   if (m.includes('already registered')) return 'Email ini sudah terdaftar. Coba login.'
-  if (m.includes('password should be at least')) return 'Password minimal 6 karakter.'
+  if (m.includes('password should be at least')) return 'Password belum memenuhi panjang minimum.'
   if (m.includes('email rate limit')) return 'Terlalu banyak percobaan. Tunggu sebentar ya.'
   if (m.includes('unable to validate email')) return 'Format email tidak valid.'
   return message

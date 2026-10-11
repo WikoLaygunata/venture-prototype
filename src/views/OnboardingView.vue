@@ -28,8 +28,7 @@ import {
   UserRound,
 } from 'lucide-vue-next'
 
-import { claimNfcToken, fetchNfcToken } from '@/lib/api'
-import { setPendingToken } from '@/lib/pendingToken'
+import { fetchNfcToken } from '@/lib/api'
 import { isSupabaseConfigured } from '@/lib/supabase'
 import { signUp } from '@/stores/auth'
 import { toast } from '@/stores/toast'
@@ -149,7 +148,8 @@ async function handleRegister() {
   formError.value = ''
 
   try {
-    const { userId, needsEmailConfirmation } = await signUp({
+    const { needsEmailConfirmation } = await signUp({
+      token: token.value,
       email: form.email.trim(),
       password: form.password,
       fullName: form.fullName.trim(),
@@ -160,15 +160,9 @@ async function handleRegister() {
     })
 
     if (needsEmailConfirmation) {
-      // No session yet, so claiming would be rejected: the keychain gets bound
-      // on the first login instead.
-      setPendingToken(token.value)
       phase.value = 'done'
       return
     }
-
-    // Bind the keychain to the brand-new account.
-    await claimNfcToken(token.value, userId)
 
     toast.success(`Keychain ${token.value} aktif! Selamat datang, ${form.fullName.split(' ')[0]} 🎉`)
     router.replace({ name: 'profile' })
@@ -318,9 +312,9 @@ async function handleRegister() {
         <CircleCheck class="h-10 w-10 text-mint" aria-hidden="true" />
         <p class="text-base font-extrabold text-slate-700">Akun kamu sudah dibuat!</p>
         <p class="max-w-[17rem] text-xs leading-relaxed text-slate-400">
-          Kami kirim link konfirmasi ke <strong>{{ form.email }}</strong>. Klik link-nya,
-          lalu login — keychain <strong class="font-mono">{{ token }}</strong> otomatis
-          terikat ke akunmu saat itu.
+          Kami kirim link konfirmasi ke <strong>{{ form.email }}</strong>. Keychain
+          <strong class="font-mono">{{ token }}</strong> sudah diamankan untuk akun ini dan akan
+          aktif setelah kamu menyelesaikan konfirmasi email.
         </p>
         <RouterLink :to="{ name: 'login' }" class="btn-primary mt-2">
           Ke halaman login

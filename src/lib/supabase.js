@@ -12,60 +12,18 @@ import { createClient } from '@supabase/supabase-js'
  * so `npm run dev` works before the backend exists.
  *
  * ---------------------------------------------------------------------------
- * EXPECTED SCHEMA (for when you wire the real project)
+ * EXPECTED SCHEMA (apply migrations in timestamp order)
  * ---------------------------------------------------------------------------
- * profiles
- *   id           uuid primary key references auth.users(id) on delete cascade
- *   username     text unique
- *   full_name    text
- *   avatar_url   text
- *   faculty      text
- *   major        text
- *   batch        text            -- angkatan, e.g. '2023'
- *   bio          text
- *   color_code   text default 'mint'   -- 'mint' | 'yellow' | 'grey' | 'red'
- *   instagram    text
- *   linkedin     text
- *   spotify      text
- *   created_at   timestamptz default now()
- *
- * nfc_tokens
- *   id           uuid primary key default gen_random_uuid()
- *   token        text unique not null          -- printed/encoded on the NFC keychain
- *   status       text default 'unclaimed'      -- 'unclaimed' | 'claimed'
- *   user_id      uuid references profiles(id)  -- null while unclaimed
- *   claimed_at   timestamptz
- *
- * pings
- *   id           uuid primary key default gen_random_uuid()
- *   sender_id    uuid references profiles(id)
- *   receiver_id  uuid references profiles(id)
- *   message      text
- *   status       text default 'pending'        -- 'pending' | 'accepted' | 'declined'
- *   created_at   timestamptz default now()
- *
- * mutuals
- *   id           uuid primary key default gen_random_uuid()
- *   user_a_id    uuid references profiles(id)
- *   user_b_id    uuid references profiles(id)
- *   created_at   timestamptz default now()
- *   unique (user_a_id, user_b_id)
- *
- * spots
- *   id           uuid primary key default gen_random_uuid()
- *   name         text           -- 'Perpustakaan', 'Kantin LT', 'Student Center'
- *   emoji        text
- *   category     text
- *   x            numeric        -- 0..100, position on the mock campus map
- *   y            numeric        -- 0..100
- *
- * location_stamps  (a "stamp" expires after 24h)
- *   id           uuid primary key default gen_random_uuid()
- *   user_id      uuid references profiles(id)
- *   spot_id      uuid references spots(id)
- *   message      text
- *   created_at   timestamptz default now()
- *   expires_at   timestamptz default now() + interval '24 hours'
+ * profiles + NFC + PING + mutuals are established by the initial migrations.
+ * The dashboard migration adds reports/admin roles. Then
+ * 20261011210000_app_api_contract_security.sql:
+ *   - migrates location_stamps from spot_id to location_label/image_url/lat/lng/
+ *     audience; coordinates are rounded server-side to four decimals.
+ *   - adds stamp_replies and blocks with RLS.
+ *   - limits profile table SELECT to public-safe columns; social handles are
+ *     returned by get_profile_socials() and updated by save_profile_socials().
+ *   - enforces audience/history visibility and PING block/quota rules server-side.
+ * Distance and bearing are derived per viewer and are not stored in the database.
  * ---------------------------------------------------------------------------
  */
 
@@ -74,6 +32,10 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim()
 
 /** True when both env vars are present, so real network calls are possible. */
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey)
+export const isDashboardSupabaseRequested =
+  import.meta.env.VITE_DASHBOARD_USE_SUPABASE?.trim().toLowerCase() === 'true'
+export const isDashboardSupabaseEnabled =
+  isSupabaseConfigured && isDashboardSupabaseRequested
 
 export const supabase = isSupabaseConfigured
   ? createClient(supabaseUrl, supabaseAnonKey, {
@@ -81,6 +43,21 @@ export const supabase = isSupabaseConfigured
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true,
+      },
+    })
+  : null
+
+/**
+ * Dashboard auth uses its own persisted session so signing into the admin
+ * panel never replaces a member's app session (or vice versa).
+ */
+export const dashboardSupabase = isDashboardSupabaseEnabled
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        storageKey: 'kenalan.dashboard.auth',
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: false,
       },
     })
   : null

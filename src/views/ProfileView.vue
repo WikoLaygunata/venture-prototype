@@ -16,7 +16,7 @@
  *    Not logged in. Profile stays fully visible, with a sticky banner that
  *    routes to /login?redirect=/user/:id so they return here after auth.
  */
-import { computed, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowRight,
@@ -29,9 +29,11 @@ import {
   Heart,
   HeartCrack,
   History,
+  KeyRound,
   Sparkles,
   LoaderCircle,
   LogOut,
+  Mail,
   MoreVertical,
   Nfc,
   Pencil,
@@ -68,7 +70,7 @@ import {
 } from '@/lib/api'
 import { getColorCode } from '@/lib/colorCodes'
 import { isSupabaseConfigured } from '@/lib/supabase'
-import { currentProfile, currentUserId, setProfile, signOut } from '@/stores/auth'
+import { changePassword, currentProfile, currentUserId, setProfile, signOut } from '@/stores/auth'
 import { toast } from '@/stores/toast'
 
 const route = useRoute()
@@ -351,6 +353,31 @@ async function shareProfile() {
 /* ------------------------------------------------------------------- logout */
 
 const settingsOpen = ref(false)
+const passwordOpen = ref(false)
+const passwordSaving = ref(false)
+const passwordError = ref('')
+const passwordForm = reactive({ current: '', next: '', confirm: '' })
+
+async function handlePasswordChange() {
+  passwordError.value = ''
+  if (passwordForm.next !== passwordForm.confirm) {
+    passwordError.value = 'Konfirmasi password tidak cocok.'
+    return
+  }
+  passwordSaving.value = true
+  try {
+    await changePassword({ currentPassword: passwordForm.current, newPassword: passwordForm.next })
+    passwordOpen.value = false
+    passwordForm.current = ''
+    passwordForm.next = ''
+    passwordForm.confirm = ''
+    toast.success('Password berhasil diperbarui.')
+  } catch (error) {
+    passwordError.value = error.message
+  } finally {
+    passwordSaving.value = false
+  }
+}
 
 async function handleSignOut() {
   try {
@@ -869,6 +896,23 @@ async function handleUnblock(user) {
         </button>
         <button
           type="button"
+          class="btn-ghost w-full !justify-start !py-3.5"
+          @click="settingsOpen = false; passwordOpen = true"
+        >
+          <KeyRound class="h-4 w-4" aria-hidden="true" />
+          Ganti password
+        </button>
+        <a
+          href="mailto:wikolaygunata@gmail.com"
+          class="btn-ghost w-full !justify-start !py-3.5"
+          @click="settingsOpen = false"
+        >
+          <Mail class="h-4 w-4" aria-hidden="true" />
+          <span class="flex-1 text-left">Hubungi bantuan</span>
+          <span class="text-[11px] font-medium text-slate-400">Email</span>
+        </a>
+        <button
+          type="button"
           class="btn-ghost w-full !justify-start !py-3.5 !text-blush-deep"
           @click="handleSignOut"
         >
@@ -876,6 +920,28 @@ async function handleUnblock(user) {
           Keluar dari akun
         </button>
       </div>
+    </BottomSheet>
+
+    <BottomSheet :open="passwordOpen" title="Ganti password" @close="passwordOpen = false">
+      <form class="space-y-3" @submit.prevent="handlePasswordChange">
+        <div>
+          <label for="current-password" class="field-label">Password saat ini</label>
+          <input id="current-password" v-model="passwordForm.current" type="password" required autocomplete="current-password" class="input-field">
+        </div>
+        <div>
+          <label for="next-password" class="field-label">Password baru</label>
+          <input id="next-password" v-model="passwordForm.next" type="password" required minlength="8" autocomplete="new-password" class="input-field">
+        </div>
+        <div>
+          <label for="confirm-next-password" class="field-label">Ulangi password baru</label>
+          <input id="confirm-next-password" v-model="passwordForm.confirm" type="password" required minlength="8" autocomplete="new-password" class="input-field">
+        </div>
+        <p v-if="passwordError" class="rounded-xl bg-blush-soft px-4 py-3 text-xs text-blush-deep" role="alert">{{ passwordError }}</p>
+        <button type="submit" class="btn-primary w-full" :disabled="passwordSaving">
+          <LoaderCircle v-if="passwordSaving" class="h-4 w-4 animate-spin" aria-hidden="true" />
+          {{ passwordSaving ? 'Menyimpan…' : 'Simpan password' }}
+        </button>
+      </form>
     </BottomSheet>
 
     <!-- =============================================== blocked users -->

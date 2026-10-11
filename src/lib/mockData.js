@@ -11,9 +11,9 @@
 import { hoursAgo, minutesAgo } from './time'
 
 // Bumped to v4: profiles gained is_discoverable, stamps dropped spot_id in
-// favour of location_label + image_url + distance_m, and stamp_replies / blocks
-// / reports are new. The seed-merge in load() keeps older snapshots from
-// breaking, but a reset is cleaner if you were on v3.
+// favour of location_label + image_url + coordinates, and stamp_replies /
+// blocks / reports are new. The seed-merge in load() keeps older snapshots
+// from breaking, but a reset is cleaner if you were on v3.
 const STORAGE_KEY = 'kenalan.demo.v8'
 
 /** Remembered stamp audience choice ('public' | 'mutual'), its own key. */
@@ -31,6 +31,29 @@ export const CAMPUS_CENTER = { lat: -6.3629, lng: 106.8275 }
 export const DEMO_CREDENTIALS = {
   email: 'demo@kenalan.id',
   password: 'kenalan123',
+}
+
+const DEMO_PASSWORD_KEY = 'kenalan.demo.password'
+
+export function getDemoPassword() {
+  try {
+    return localStorage.getItem(DEMO_PASSWORD_KEY) || DEMO_CREDENTIALS.password
+  } catch {
+    return DEMO_CREDENTIALS.password
+  }
+}
+
+export function setDemoPassword(password) {
+  try {
+    localStorage.setItem(DEMO_PASSWORD_KEY, String(password))
+  } catch {
+    throw new Error('Password demo tidak dapat disimpan pada browser ini.')
+  }
+}
+
+export function getDemoEmail() {
+  return demoDb.profiles.find((profile) => profile.id === 'u-raka')?.admin_email
+    || DEMO_CREDENTIALS.email
 }
 
 /** Max simultaneous outgoing PINGs still awaiting a reply (anti-spam). */
@@ -218,13 +241,31 @@ function seed() {
      * - the rest are bound to a profile -> test the auto-redirect flow
      */
     nfc_tokens: [
-      { id: 't-1', token: 'KNL-NEW-01', status: 'unclaimed', user_id: null, claimed_at: null },
-      { id: 't-2', token: 'KNL-NEW-02', status: 'unclaimed', user_id: null, claimed_at: null },
+      {
+        id: 't-1',
+        token: 'KNL-NEW-01',
+        status: 'unclaimed',
+        user_id: null,
+        batch_label: 'demo-samples',
+        created_at: hoursAgo(48),
+        claimed_at: null,
+      },
+      {
+        id: 't-2',
+        token: 'KNL-NEW-02',
+        status: 'unclaimed',
+        user_id: null,
+        batch_label: 'demo-samples',
+        created_at: hoursAgo(36),
+        claimed_at: null,
+      },
       {
         id: 't-3',
         token: 'KNL-RAKA-01',
         status: 'claimed',
         user_id: 'u-raka',
+        batch_label: 'demo-samples',
+        created_at: hoursAgo(900),
         claimed_at: hoursAgo(890),
       },
       {
@@ -232,6 +273,8 @@ function seed() {
         token: 'KNL-NADIA-07',
         status: 'claimed',
         user_id: 'u-nadia',
+        batch_label: 'demo-samples',
+        created_at: hoursAgo(800),
         claimed_at: hoursAgo(780),
       },
       {
@@ -239,6 +282,8 @@ function seed() {
         token: 'KNL-BIMO-12',
         status: 'claimed',
         user_id: 'u-bimo',
+        batch_label: 'demo-samples',
+        created_at: hoursAgo(1105),
         claimed_at: hoursAgo(1100),
       },
     ],
@@ -246,16 +291,14 @@ function seed() {
     /**
      * Location Stamps are now a lightweight forum: each stamp is a thread, and
      * people reply to it (see stamp_replies). The physical place is NOT named;
-     * only a free-text `location_label` the author chose plus a precomputed
-     * `distance_m` from the viewer. `image_url` is optional.
+      * only a free-text `location_label` the author chose. Distance and bearing
+      * are computed from coordinates for the current viewer; image_url is optional.
      */
     location_stamps: [
       {
         id: 'st-1',
         user_id: 'u-nadia',
         location_label: 'Deket area kantin',
-        distance_m: 40,
-        bearing_deg: 35,
         lat: -6.3625,
         lng: 106.8279,
         audience: 'mutual',
@@ -267,8 +310,6 @@ function seed() {
         id: 'st-2',
         user_id: 'u-farrel',
         location_label: 'Gedung sebelah barat, lantai atas',
-        distance_m: 180,
-        bearing_deg: 270,
         lat: -6.3631,
         lng: 106.8262,
         message: 'Nugas ML, butuh second opinion soal dataset. Boleh mampir diskusi.',
@@ -279,8 +320,6 @@ function seed() {
         id: 'st-3',
         user_id: 'u-gita',
         location_label: 'Area terbuka tengah kampus',
-        distance_m: 95,
-        bearing_deg: 150,
         lat: -6.3637,
         lng: 106.8281,
         message: 'Lagi nunggu jadwal kosong. Open buat ngobrol random sampe jam 4.',
@@ -291,8 +330,6 @@ function seed() {
         id: 'st-4',
         user_id: 'u-ayra',
         location_label: 'Kedai kopi dekat gerbang',
-        distance_m: 520,
-        bearing_deg: 310,
         lat: -6.3598,
         lng: 106.8251,
         message: 'Matcha-nya lagi promo. Ada yang mau nemenin brainstorming brand?',
@@ -303,8 +340,6 @@ function seed() {
         id: 'st-5',
         user_id: 'u-bimo',
         location_label: 'Lapangan olahraga',
-        distance_m: 1200,
-        bearing_deg: 205,
         lat: -6.3688,
         lng: 106.8233,
         audience: 'mutual',
@@ -317,8 +352,6 @@ function seed() {
         id: 'st-old',
         user_id: 'u-gita',
         location_label: 'Perpus lama',
-        distance_m: 60,
-        bearing_deg: 90,
         lat: -6.3627,
         lng: 106.8269,
         message: 'Stamp lama yang seharusnya nggak muncul di feed.',
@@ -331,8 +364,6 @@ function seed() {
         id: 'st-h1',
         user_id: 'u-raka',
         location_label: 'Perpus lantai 3',
-        distance_m: 0,
-        bearing_deg: 0,
         lat: -6.3633,
         lng: 106.8271,
         message: 'Nugas bareng yuk, aku bawa cemilan.',
@@ -343,8 +374,6 @@ function seed() {
         id: 'st-h2',
         user_id: 'u-raka',
         location_label: 'Coffee corner',
-        distance_m: 0,
-        bearing_deg: 0,
         lat: -6.3619,
         lng: 106.8288,
         message: 'Ngopi sore sambil review desain, mampir aja.',
@@ -355,8 +384,6 @@ function seed() {
         id: 'st-h3',
         user_id: 'u-raka',
         location_label: 'Student center',
-        distance_m: 0,
-        bearing_deg: 0,
         lat: -6.3641,
         lng: 106.8259,
         message: 'Rapat kecil komunitas, open buat yang penasaran.',
@@ -367,8 +394,6 @@ function seed() {
         id: 'st-h4',
         user_id: 'u-raka',
         location_label: 'Taman fakultas',
-        distance_m: 0,
-        bearing_deg: 0,
         lat: -6.3609,
         lng: 106.8273,
         message: 'Sketsa pagi sebelum kelas. Produktif dikit.',
@@ -438,23 +463,96 @@ function seed() {
     blocks: [],
 
     /** Abuse reports (demo keeps them local; a real backend would queue them). */
-    reports: [],
+    reports: [
+      {
+        id: 'rp-1',
+        reporter_id: 'u-gita',
+        reported_id: 'u-farrel',
+        report_type: 'user',
+        reason: 'Mengirim pesan promosi berulang kali.',
+        status: 'pending',
+        created_at: hoursAgo(4),
+      },
+      {
+        id: 'rp-2',
+        reporter_id: 'u-ayra',
+        reported_id: 'u-bimo',
+        report_type: 'user',
+        reason: 'Perilaku tidak nyaman saat mengirim PING.',
+        status: 'pending',
+        created_at: hoursAgo(14),
+      },
+      {
+        id: 'rp-3',
+        reporter_id: 'u-nadia',
+        reported_id: 'u-gita',
+        report_type: 'user',
+        reason: 'Akun terlihat menyamar sebagai orang lain.',
+        status: 'resolved',
+        created_at: hoursAgo(72),
+        reviewed_at: hoursAgo(60),
+      },
+    ],
+
+    /** Admin dashboard actions, stored locally only in demo mode. */
+    dashboard_audit_logs: [],
 
     /** Demo auth: which profile is "logged in". null = guest. */
     session_user_id: null,
   }
 }
 
+function refreshSeedStampTimestamps(stamps, seededStamps) {
+  const seedById = new Map(seededStamps.map((stamp) => [stamp.id, stamp]))
+  return stamps.map((stamp) => {
+    const seedStamp = seedById.get(stamp.id)
+    if (!seedStamp) return stamp
+
+    const createdAt = seedStamp.created_at
+    return {
+      ...stamp,
+      created_at: createdAt,
+      expires_at: new Date(new Date(createdAt).getTime() + 24 * 60 * 60 * 1000).toISOString(),
+    }
+  })
+}
+
+function freshSeed() {
+  const defaults = seed()
+  defaults.location_stamps = refreshSeedStampTimestamps(
+    defaults.location_stamps,
+    defaults.location_stamps,
+  )
+  return defaults
+}
+
 function load() {
-  if (typeof localStorage === 'undefined') return seed()
+  if (typeof localStorage === 'undefined') return freshSeed()
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return seed()
+    if (!raw) return freshSeed()
     const parsed = JSON.parse(raw)
     // Merge over a fresh seed so newly added tables don't break old snapshots.
-    return { ...seed(), ...parsed }
+    const defaults = freshSeed()
+    const merged = { ...defaults, ...parsed }
+    if (Array.isArray(parsed.location_stamps)) {
+      merged.location_stamps = refreshSeedStampTimestamps(
+        parsed.location_stamps,
+        defaults.location_stamps,
+      )
+    }
+    if (!Array.isArray(parsed.reports) || parsed.reports.length === 0) {
+      merged.reports = defaults.reports
+    } else {
+      merged.reports = parsed.reports.map((report) => ({
+        report_type: 'user',
+        status: 'pending',
+        ...report,
+      }))
+    }
+    return merged
   } catch {
-    return seed()
+    return freshSeed()
   }
 }
 
@@ -473,7 +571,7 @@ export function persistDemoDb() {
 /** Wipes demo progress and reloads the seed (used by the Reset Demo button). */
 export function resetDemoDb() {
   if (typeof localStorage !== 'undefined') localStorage.removeItem(STORAGE_KEY)
-  Object.assign(demoDb, seed())
+  Object.assign(demoDb, freshSeed())
 }
 
 export function demoId(prefix) {

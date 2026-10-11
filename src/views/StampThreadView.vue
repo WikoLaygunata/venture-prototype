@@ -50,7 +50,7 @@ const isMutualOnly = computed(() => (stamp.value?.audience ?? 'public') === 'mut
 
 /**
  * Real distance from the viewer to the stamp, computed from coordinates — not
- * the seed's fictional `distance_m`. It's your own stamp -> no distance; no
+ * a persisted viewer-relative distance. It's your own stamp -> no distance; no
  * geolocation yet -> null (label says "jarak belum diketahui").
  */
 const distanceM = computed(() => {

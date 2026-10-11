@@ -26,6 +26,81 @@ export { MAX_PENDING_PINGS }
 
 const byNewest = (a, b) => new Date(b.created_at) - new Date(a.created_at)
 const byOldest = (a, b) => new Date(a.created_at) - new Date(b.created_at)
+const PROFILE_COLUMNS =
+  'id,username,full_name,avatar_url,faculty,major,batch,bio,color_code,interests,is_discoverable,stamp_history_public,created_at,updated_at'
+const PROFILE_EMBED =
+  'id,username,full_name,avatar_url,faculty,major,batch,bio,color_code,interests,created_at'
+const STAMP_COLUMNS =
+  'id,user_id,location_label,image_url,lat,lng,audience,message,created_at,expires_at'
+const PING_COLUMNS = 'id,sender_id,receiver_id,message,status,created_at,responded_at'
+const SOCIAL_KEYS = ['instagram', 'linkedin', 'spotify', 'whatsapp', 'line']
+const PROFILE_WRITE_KEYS = [
+  'username',
+  'full_name',
+  'avatar_url',
+  'faculty',
+  'major',
+  'batch',
+  'bio',
+  'color_code',
+  'interests',
+  'is_discoverable',
+  'stamp_history_public',
+]
+
+function splitProfilePayload(payload) {
+  const profile = {}
+  const socials = {}
+  let hasSocials = false
+
+  for (const [key, value] of Object.entries(payload ?? {})) {
+    if (key === 'id' && typeof value === 'string') {
+      profile.id = value
+    } else if (PROFILE_WRITE_KEYS.includes(key)) {
+      profile[key] = value
+    } else if (SOCIAL_KEYS.includes(key)) {
+      socials[key] = String(value ?? '').trim()
+      hasSocials = true
+    } else if (key === 'social_visibility') {
+      socials.social_visibility = value
+      hasSocials = true
+    } else {
+      throw new Error(`Field profil tidak didukung: ${key}`)
+    }
+  }
+
+  return { profile, socials, hasSocials }
+}
+
+async function saveProfileSocials(socials) {
+  const values = Object.fromEntries(SOCIAL_KEYS.map((key) => [key, String(socials[key] ?? '').trim()]))
+  const limits = { instagram: 300, linkedin: 300, spotify: 300, whatsapp: 64, line: 300 }
+  for (const [key, limit] of Object.entries(limits)) {
+    if (values[key].length > limit) throw new Error(`Kontak ${key} maksimal ${limit} karakter.`)
+  }
+  const visibility = { ...defaultSocialVisibility(), ...(socials.social_visibility ?? {}) }
+  const { data, error } = await supabase.rpc('save_profile_socials', {
+    p_socials: values,
+    p_visibility: visibility,
+  })
+  if (error) throw new Error(`Gagal menyimpan kontak profil: ${rpcMessage(error, error.message)}`)
+  return data
+}
+
+async function attachProfileSocials(profile) {
+  if (!profile) return null
+  const { data, error } = await supabase.rpc('get_profile_socials', {
+    p_profile_id: profile.id,
+  })
+  if (error) throw new Error(`Gagal memuat kontak profil: ${error.message}`)
+
+  const socials = data ?? {}
+  return {
+    ...profile,
+    ...Object.fromEntries(SOCIAL_KEYS.map((key) => [key, socials[key] ?? ''])),
+    ...(socials.social_visibility ? { social_visibility: socials.social_visibility } : {}),
+  }
+}
 
 function findProfile(id) {
   return demoDb.profiles.find((p) => p.id === id) ?? null
@@ -154,12 +229,12 @@ export async function fetchProfile(userId) {
 
   const { data, error } = await supabase
     .from('profiles')
-    .select('*')
+    .select(PROFILE_COLUMNS)
     .eq('id', userId)
     .maybeSingle()
 
   if (error) throw new Error(`Gagal memuat profil: ${error.message}`)
-  return data
+  return attachProfileSocials(data)
 }
 
 export async function createProfile(profile) {
@@ -180,19 +255,19 @@ export async function createProfile(profile) {
     return { ...row }
   }
 
-  // Upsert, not insert: the `on_auth_user_created` trigger already created a
-  // skeleton row, so this fills in the details the signup form collected.
+  const { profile: profileFields, socials } = splitProfilePayload(profile)
   const { data, error } = await supabase
     .from('profiles')
-    .upsert(profile, { onConflict: 'id' })
-    .select()
+    .upsert(profileFields, { onConflict: 'id' })
+    .select(PROFILE_COLUMNS)
     .single()
 
   if (error) {
     if (error.code === '23505') throw new Error('Username ini sudah dipakai.')
     throw new Error(`Gagal membuat profil: ${error.message}`)
   }
-  return data
+  const savedSocials = await saveProfileSocials(socials)
+  return { ...data, ...savedSocials }
 }
 
 export async function updateProfile(userId, patch) {
@@ -205,19 +280,35 @@ export async function updateProfile(userId, patch) {
     return { ...row }
   }
 
-  const { data, error } = await supabase
-    .from('profiles')
-    .update(patch)
-    .eq('id', userId)
-    .select()
-    .single()
+  const { profile: profilePatch, socials, hasSocials } = splitProfilePayload(patch)
+  delete profilePatch.id
 
-  if (error) {
-    if (error.code === '23505') throw new Error('Username ini sudah dipakai.')
-    if (error.code === '23514') throw new Error('Username hanya boleh huruf, angka, titik, dan underscore (3-24 karakter).')
-    throw new Error(`Gagal menyimpan profil: ${error.message}`)
+  let data = null
+  if (Object.keys(profilePatch).length > 0) {
+    const result = await supabase
+      .from('profiles')
+      .update(profilePatch)
+      .eq('id', userId)
+      .select(PROFILE_COLUMNS)
+      .maybeSingle()
+    data = result.data
+    if (result.error) {
+      if (result.error.code === '23505') throw new Error('Username ini sudah dipakai.')
+      if (result.error.code === '23514') throw new Error('Username hanya boleh huruf, angka, titik, dan underscore (3-24 karakter).')
+      throw new Error(`Gagal menyimpan profil: ${result.error.message}`)
+    }
   }
-  return data
+
+  if (!data) {
+    const result = await supabase.from('profiles').select(PROFILE_COLUMNS).eq('id', userId).maybeSingle()
+    if (result.error) throw new Error(`Gagal memuat profil: ${result.error.message}`)
+    data = result.data
+  }
+  if (!data) throw new Error('Profil tidak ditemukan.')
+  if (!hasSocials) return attachProfileSocials(data)
+
+  const savedSocials = await saveProfileSocials(socials)
+  return { ...data, ...savedSocials }
 }
 
 /** Shortcut used by the color-code picker. */
@@ -259,12 +350,23 @@ export async function fetchRecommendedProfiles(userId, limit = 12) {
       .map((p) => ({ ...p }))
   }
 
-  const mutualIds = (await fetchMutuals(userId)).map((p) => p.id)
-  const excluded = [userId, ...mutualIds].filter(Boolean)
+  const [mutuals, blockRows] = await Promise.all([
+    fetchMutuals(userId),
+    supabase
+      .from('blocks')
+      .select('blocker_id,blocked_id')
+      .or(`blocker_id.eq.${userId},blocked_id.eq.${userId}`),
+  ])
+  if (blockRows.error) throw new Error(`Gagal memuat blokir: ${blockRows.error.message}`)
+  const mutualIds = mutuals.map((p) => p.id)
+  const blockedIds = (blockRows.data ?? []).map((row) =>
+    row.blocker_id === userId ? row.blocked_id : row.blocker_id,
+  )
+  const excluded = [...new Set([userId, ...mutualIds, ...blockedIds])].filter(Boolean)
 
   const { data, error } = await supabase
     .from('profiles')
-    .select('*')
+    .select(PROFILE_COLUMNS)
     .eq('is_discoverable', true)
     .not('id', 'in', `(${excluded.join(',')})`)
     .limit(limit)
@@ -286,8 +388,8 @@ function decorateStamp(s) {
 
 /**
  * Stamps dropped in the last 24 hours, newest first, with author + reply count.
- * The physical place is never exposed — only the author's `location_label` and
- * a `distance_m` from the viewer.
+ * The physical place is approximate; distance and bearing are computed
+ * dynamically from rounded coordinates on the viewer's device.
  */
 export async function fetchRecentStamps(viewerId = null) {
   if (!isSupabaseConfigured) {
@@ -301,22 +403,15 @@ export async function fetchRecentStamps(viewerId = null) {
 
   const { data, error } = await supabase
     .from('location_stamps')
-    .select('*, profile:profiles(*), reply_count:stamp_replies(count)')
+    .select(`${STAMP_COLUMNS}, profile:profiles(${PROFILE_EMBED}), reply_count:stamp_replies(count)`)
     .gte('created_at', isoSince())
     .order('created_at', { ascending: false })
 
   if (error) throw new Error(`Gagal memuat stamp: ${error.message}`)
-
-  // Mutual-only stamps are filtered client-side here; a production backend
-  // should enforce this with RLS/RPC so hidden rows never leave the server.
-  const mutualIds = viewerId ? new Set((await fetchMutuals(viewerId)).map((p) => p.id)) : new Set()
-
-  return (data ?? [])
-    .filter((s) => canViewStamp(s, viewerId, mutualIds))
-    .map((s) => ({
-      ...s,
-      reply_count: Array.isArray(s.reply_count) ? (s.reply_count[0]?.count ?? 0) : s.reply_count,
-    }))
+  return (data ?? []).map((s) => ({
+    ...s,
+    reply_count: Array.isArray(s.reply_count) ? (s.reply_count[0]?.count ?? 0) : s.reply_count,
+  }))
 }
 
 /**
@@ -336,17 +431,11 @@ export async function fetchStamp(stampId, viewerId = null) {
 
   const { data, error } = await supabase
     .from('location_stamps')
-    .select('*, profile:profiles(*)')
+    .select(`${STAMP_COLUMNS}, profile:profiles(${PROFILE_EMBED})`)
     .eq('id', stampId)
     .maybeSingle()
 
   if (error) throw new Error(`Gagal memuat stamp: ${error.message}`)
-  if (!data) return null
-
-  if ((data.audience ?? 'public') === 'mutual' && viewerId && data.user_id !== viewerId) {
-    const allowed = await isMutualWith(viewerId, data.user_id)
-    if (!allowed) return { restricted: true }
-  }
   return data
 }
 
@@ -368,7 +457,7 @@ export async function fetchStampHistory(userId, windowMs = STAMP_HISTORY_MS) {
   const since = new Date(Date.now() - windowMs).toISOString()
   const { data, error } = await supabase
     .from('location_stamps')
-    .select('*, profile:profiles(*), reply_count:stamp_replies(count)')
+    .select(`${STAMP_COLUMNS}, profile:profiles(${PROFILE_EMBED}), reply_count:stamp_replies(count)`)
     .eq('user_id', userId)
     .gte('created_at', since)
     .order('created_at', { ascending: false })
@@ -385,11 +474,26 @@ export async function createStamp({
   message,
   locationLabel = '',
   imageUrl = '',
-  distanceM = 0,
   audience = 'public',
   lat = null,
   lng = null,
 }) {
+  if (!userId) throw new Error('Harus login untuk membuat stamp.')
+  const trimmedMessage = String(message ?? '').trim()
+  if (trimmedMessage.length < 4 || trimmedMessage.length > 180) {
+    throw new Error('Pesan stamp harus berisi 4 sampai 180 karakter.')
+  }
+  const safeLocationLabel = String(locationLabel ?? '').trim()
+  if (safeLocationLabel.length > 120) throw new Error('Keterangan lokasi maksimal 120 karakter.')
+  const safeImageUrl = String(imageUrl ?? '')
+  if (safeImageUrl.length > 7_000_000) throw new Error('Ukuran gambar maksimal 5MB.')
+  if ((lat == null) !== (lng == null)) throw new Error('Koordinat lokasi tidak lengkap.')
+  if (
+    (lat != null && (!Number.isFinite(Number(lat)) || Number(lat) < -90 || Number(lat) > 90)) ||
+    (lng != null && (!Number.isFinite(Number(lng)) || Number(lng) < -180 || Number(lng) > 180))
+  ) {
+    throw new Error('Koordinat lokasi tidak valid.')
+  }
   const now = new Date()
   const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000)
   const safeAudience = audience === 'mutual' ? 'mutual' : 'public'
@@ -398,7 +502,7 @@ export async function createStamp({
   // stamp out a little around the campus center so the map isn't a single pile.
   const coords =
     lat != null && lng != null
-      ? { lat, lng }
+      ? { lat: Number(lat), lng: Number(lng) }
       : {
           lat: CAMPUS_CENTER.lat + (Math.random() - 0.5) * 0.004,
           lng: CAMPUS_CENTER.lng + (Math.random() - 0.5) * 0.004,
@@ -408,14 +512,12 @@ export async function createStamp({
     const row = {
       id: demoId('st'),
       user_id: userId,
-      location_label: locationLabel,
-      image_url: imageUrl,
-      distance_m: 0, // it's your own stamp -> zero distance from you
-      bearing_deg: 0,
-      lat: coords.lat,
-      lng: coords.lng,
+      location_label: safeLocationLabel,
+      image_url: safeImageUrl,
+      lat: Number(coords.lat.toFixed(4)),
+      lng: Number(coords.lng.toFixed(4)),
       audience: safeAudience,
-      message,
+      message: trimmedMessage,
       created_at: now.toISOString(),
       expires_at: expiresAt.toISOString(),
     }
@@ -429,16 +531,14 @@ export async function createStamp({
     .from('location_stamps')
     .insert({
       user_id: userId,
-      message,
-      location_label: locationLabel,
-      image_url: imageUrl || null,
-      distance_m: distanceM,
+      message: trimmedMessage,
+      location_label: safeLocationLabel,
+      image_url: safeImageUrl || null,
       lat: coords.lat,
       lng: coords.lng,
       audience: safeAudience,
-      expires_at: expiresAt.toISOString(),
     })
-    .select('*, profile:profiles(*)')
+    .select(`${STAMP_COLUMNS}, profile:profiles(${PROFILE_EMBED})`)
     .single()
 
   if (error) throw new Error(`Gagal membuat stamp: ${error.message}`)
@@ -481,7 +581,7 @@ export async function fetchStampReplies(stampId) {
 
   const { data, error } = await supabase
     .from('stamp_replies')
-    .select('*, profile:profiles(*)')
+    .select(`id,stamp_id,user_id,message,created_at,profile:profiles(${PROFILE_EMBED})`)
     .eq('stamp_id', stampId)
     .order('created_at', { ascending: true })
 
@@ -490,8 +590,11 @@ export async function fetchStampReplies(stampId) {
 }
 
 export async function createStampReply({ stampId, userId, message }) {
-  const trimmed = String(message).trim()
-  if (!trimmed) throw new Error('Balasan tidak boleh kosong.')
+  const trimmed = String(message ?? '').trim()
+  if (!stampId || !userId) throw new Error('Data balasan tidak lengkap.')
+  if (trimmed.length < 1 || trimmed.length > 500) {
+    throw new Error('Balasan harus berisi 1 sampai 500 karakter.')
+  }
 
   if (!isSupabaseConfigured) {
     const row = {
@@ -510,7 +613,7 @@ export async function createStampReply({ stampId, userId, message }) {
   const { data, error } = await supabase
     .from('stamp_replies')
     .insert({ stamp_id: stampId, user_id: userId, message: trimmed })
-    .select('*, profile:profiles(*)')
+    .select(`id,stamp_id,user_id,message,created_at,profile:profiles(${PROFILE_EMBED})`)
     .single()
 
   if (error) throw new Error(`Gagal mengirim balasan: ${error.message}`)
@@ -531,12 +634,20 @@ export async function fetchIncomingPings(userId) {
 
   const { data, error } = await supabase
     .from('pings')
-    .select('*, sender:profiles!pings_sender_id_fkey(*)')
+    .select(`${PING_COLUMNS}, sender:profiles!pings_sender_id_fkey(${PROFILE_EMBED})`)
     .eq('receiver_id', userId)
     .order('created_at', { ascending: false })
 
   if (error) throw new Error(`Gagal memuat PING: ${error.message}`)
-  return data ?? []
+  const { data: blockRows, error: blockError } = await supabase
+    .from('blocks')
+    .select('blocker_id,blocked_id')
+    .or(`blocker_id.eq.${userId},blocked_id.eq.${userId}`)
+  if (blockError) throw new Error(`Gagal memuat blokir: ${blockError.message}`)
+  const blockedIds = new Set(
+    (blockRows ?? []).map((row) => (row.blocker_id === userId ? row.blocked_id : row.blocker_id)),
+  )
+  return (data ?? []).filter((ping) => !blockedIds.has(ping.sender_id))
 }
 
 export async function fetchSentPings(userId) {
@@ -550,7 +661,7 @@ export async function fetchSentPings(userId) {
 
   const { data, error } = await supabase
     .from('pings')
-    .select('*, receiver:profiles!pings_receiver_id_fkey(*)')
+    .select(`${PING_COLUMNS}, receiver:profiles!pings_receiver_id_fkey(${PROFILE_EMBED})`)
     .eq('sender_id', userId)
     .order('created_at', { ascending: false })
 
@@ -572,12 +683,17 @@ export async function countPendingSentPings(userId) {
     .eq('sender_id', userId)
     .eq('status', 'pending')
 
-  if (error) return 0
+  if (error) throw new Error(`Gagal menghitung PING: ${error.message}`)
   return count ?? 0
 }
 
 export async function sendPing({ senderId, receiverId, message }) {
+  const trimmedMessage = String(message ?? '').trim()
+  if (!senderId || !receiverId) throw new Error('Data penerima PING tidak lengkap.')
   if (senderId === receiverId) throw new Error('Nggak bisa PING diri sendiri 😅')
+  if (trimmedMessage.length < 1 || trimmedMessage.length > 220) {
+    throw new Error('Pesan PING harus berisi 1 sampai 220 karakter.')
+  }
 
   if (!isSupabaseConfigured) {
     if (blockedIdsFor(senderId).has(receiverId)) {
@@ -600,7 +716,7 @@ export async function sendPing({ senderId, receiverId, message }) {
       id: demoId('p'),
       sender_id: senderId,
       receiver_id: receiverId,
-      message,
+      message: trimmedMessage,
       status: 'pending',
       created_at: new Date().toISOString(),
     }
@@ -610,8 +726,8 @@ export async function sendPing({ senderId, receiverId, message }) {
     return { ...row }
   }
 
-  // Enforce the client-side ceiling too; the DB has the final say via the
-  // `pings_pending_quota` trigger (migration 03).
+  // The database trigger serializes concurrent requests and enforces the
+  // authoritative limit; this check provides quicker feedback in the UI.
   const pendingCount = await countPendingSentPings(senderId)
   if (pendingCount >= MAX_PENDING_PINGS) {
     throw new Error(
@@ -621,13 +737,19 @@ export async function sendPing({ senderId, receiverId, message }) {
 
   const { data, error } = await supabase
     .from('pings')
-    .insert({ sender_id: senderId, receiver_id: receiverId, message, status: 'pending' })
-    .select()
+    .insert({ sender_id: senderId, receiver_id: receiverId, message: trimmedMessage, status: 'pending' })
+    .select(PING_COLUMNS)
     .single()
 
   if (error) {
     if (error.code === '23505') {
       throw new Error('Kamu udah kirim PING ke orang ini, tunggu balasannya ya.')
+    }
+    if (error.message?.includes('PING_QUOTA_REACHED')) {
+      throw new Error(`Batas PING tercapai (maks ${MAX_PENDING_PINGS} yang belum dibalas). Tunggu balasan dulu ya.`)
+    }
+    if (error.message?.includes('USER_BLOCKED')) {
+      throw new Error('Kamu nggak bisa kirim PING ke orang ini.')
     }
     throw new Error(rpcMessage(error, `Gagal mengirim PING: ${error.message}`))
   }
@@ -652,7 +774,7 @@ export async function hasPendingPing(senderId, receiverId) {
     .eq('status', 'pending')
     .maybeSingle()
 
-  if (error) return false
+  if (error) throw new Error(`Gagal memeriksa PING: ${error.message}`)
   return Boolean(data)
 }
 
@@ -693,7 +815,9 @@ export async function respondToPing(pingId, status) {
 /* ----------------------------------------------------------- block & report */
 
 export async function blockUser(blockerId, blockedId) {
-  if (!blockerId || !blockedId || blockerId === blockedId) return false
+  if (!blockerId || !blockedId || blockerId === blockedId) {
+    throw new Error('Pengguna tujuan blokir tidak valid.')
+  }
 
   if (!isSupabaseConfigured) {
     if (!demoDb.blocks.some((b) => b.blocker_id === blockerId && b.blocked_id === blockedId)) {
@@ -718,12 +842,7 @@ export async function blockUser(blockerId, blockedId) {
     return true
   }
 
-  const { error } = await supabase
-    .from('blocks')
-    .upsert(
-      { blocker_id: blockerId, blocked_id: blockedId },
-      { onConflict: 'blocker_id,blocked_id' },
-    )
+  const { error } = await supabase.rpc('block_user', { p_blocked_id: blockedId })
 
   if (error) throw new Error(`Gagal memblokir: ${error.message}`)
   return true
@@ -769,7 +888,7 @@ export async function fetchBlockedUsers(blockerId) {
 
   const { data, error } = await supabase
     .from('blocks')
-    .select('created_at, blocked:profiles!blocks_blocked_id_fkey(*)')
+    .select(`created_at, blocked:profiles!blocks_blocked_id_fkey(${PROFILE_EMBED})`)
     .eq('blocker_id', blockerId)
     .order('created_at', { ascending: false })
 
@@ -794,20 +913,28 @@ export async function isBlocked(blockerId, blockedId) {
     .eq('blocked_id', blockedId)
     .maybeSingle()
 
-  if (error) return false
+  if (error) throw new Error(`Gagal memeriksa blokir: ${error.message}`)
   return Boolean(data)
 }
 
 export async function reportUser({ reporterId, reportedId, reason }) {
   if (!reporterId || !reportedId) throw new Error('Data laporan tidak lengkap.')
+  const trimmedReason = String(reason ?? '').trim()
+  if (trimmedReason.length < 1 || trimmedReason.length > 1000) {
+    throw new Error('Alasan laporan harus berisi 1 sampai 1000 karakter.')
+  }
 
   if (!isSupabaseConfigured) {
     demoDb.reports.push({
       id: demoId('rp'),
       reporter_id: reporterId,
       reported_id: reportedId,
-      reason: String(reason ?? '').trim(),
+      report_type: 'user',
+      reason: trimmedReason,
+      status: 'pending',
       created_at: new Date().toISOString(),
+      reviewed_at: null,
+      reviewed_by: null,
     })
     persistDemoDb()
     await fakeDelay(200)
@@ -816,7 +943,7 @@ export async function reportUser({ reporterId, reportedId, reason }) {
 
   const { error } = await supabase
     .from('reports')
-    .insert({ reporter_id: reporterId, reported_id: reportedId, reason: String(reason ?? '').trim() })
+    .insert({ reporter_id: reporterId, reported_id: reportedId, reason: trimmedReason })
 
   if (error) throw new Error(`Gagal mengirim laporan: ${error.message}`)
   return true
@@ -848,7 +975,7 @@ export async function fetchMutualCount(userId) {
   }
 
   const { data, error } = await supabase.rpc('count_mutuals', { p_user_id: userId })
-  if (error) return 0
+  if (error) throw new Error(`Gagal menghitung mutual: ${error.message}`)
   return Number(data) || 0
 }
 
@@ -870,7 +997,7 @@ export async function fetchMutuals(userId) {
   const { data, error } = await supabase
     .from('mutuals')
     .select(
-      'created_at, user_a_id, user_b_id, a:profiles!mutuals_user_a_id_fkey(*), b:profiles!mutuals_user_b_id_fkey(*)',
+      `created_at, user_a_id, user_b_id, a:profiles!mutuals_user_a_id_fkey(${PROFILE_EMBED}), b:profiles!mutuals_user_b_id_fkey(${PROFILE_EMBED})`,
     )
     .or(`user_a_id.eq.${userId},user_b_id.eq.${userId}`)
     .order('created_at', { ascending: false })
@@ -900,7 +1027,7 @@ export async function isMutualWith(userId, otherId) {
     .eq('user_b_id', b)
     .maybeSingle()
 
-  if (error) return false
+  if (error) throw new Error(`Gagal memeriksa mutual: ${error.message}`)
   return Boolean(data)
 }
 

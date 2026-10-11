@@ -1,10 +1,10 @@
 /**
- * Deferred keychain claims.
+ * Legacy deferred keychain claims.
  *
- * `claim_nfc_token()` derives the owner from `auth.uid()`, which means it needs
- * a session. When Supabase has email confirmation enabled there is no session
- * right after `signUp()` — so we remember which keychain the person was holding
- * and finish the claim on their first successful login.
+ * Older builds created the account before claiming its keychain and persisted
+ * the token until first login. New signup requests atomically claim the token
+ * from the auth.users trigger; this helper remains only to finish old pending
+ * claims already stored in a browser.
  *
  * Only the token string is stored, never credentials.
  */

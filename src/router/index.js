@@ -1,5 +1,11 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { authReady, currentUserId, initAuth } from '@/stores/auth'
+import {
+  dashboardAuthReady,
+  dashboardRole,
+  initDashboardAuth,
+  isDashboardAuthenticated,
+} from '@/stores/dashboardAuth'
 
 /**
  * Route map for the Kenalan prototype.
@@ -9,6 +15,60 @@ import { authReady, currentUserId, initAuth } from '@/stores/auth'
  * meta.hideNav       -> full-bleed screens without the bottom tab bar
  */
 const routes = [
+  {
+    path: '/dashboard/login',
+    name: 'dashboard-login',
+    component: () => import('@/views/DashboardLoginView.vue'),
+    meta: { dashboardGuestOnly: true },
+  },
+  {
+    path: '/dashboard',
+    component: () => import('@/layouts/DashboardLayout.vue'),
+    meta: { requiresDashboardAuth: true },
+    children: [
+      { path: '', redirect: { name: 'dashboard-home' } },
+      {
+        path: 'home',
+        name: 'dashboard-home',
+        component: () => import('@/views/DashboardHomeView.vue'),
+        meta: { dashboardRoles: ['admin', 'moderator', 'superadmin'] },
+      },
+      {
+        path: 'users',
+        name: 'dashboard-users',
+        component: () => import('@/views/DashboardUsersView.vue'),
+        meta: { dashboardRoles: ['admin', 'moderator', 'superadmin'] },
+      },
+      {
+        path: 'users/:userId',
+        name: 'dashboard-user-detail',
+        component: () => import('@/views/DashboardUserDetailView.vue'),
+        meta: { dashboardRoles: ['admin', 'moderator', 'superadmin'] },
+      },
+      {
+        path: 'nfc-tokens',
+        name: 'dashboard-nfc-tokens',
+        component: () => import('@/views/DashboardTokensView.vue'),
+        meta: { dashboardRoles: ['admin', 'superadmin'] },
+      },
+      {
+        path: 'stamps',
+        name: 'dashboard-stamps',
+        component: () => import('@/views/DashboardStampsView.vue'),
+        meta: { dashboardRoles: ['admin', 'moderator', 'superadmin'] },
+      },
+      {
+        path: 'reports',
+        name: 'dashboard-reports',
+        component: () => import('@/views/DashboardReportsView.vue'),
+        meta: { dashboardRoles: ['admin', 'moderator', 'superadmin'] },
+      },
+      {
+        path: ':pathMatch(.*)*',
+        redirect: { name: 'dashboard-home' },
+      },
+    ],
+  },
   {
     path: '/',
     name: 'home',
@@ -37,6 +97,18 @@ const routes = [
     name: 'login',
     component: () => import('@/views/LoginView.vue'),
     meta: { guestOnly: true, hideNav: true },
+  },
+  {
+    path: '/forgot-password',
+    name: 'forgot-password',
+    component: () => import('@/views/ForgotPasswordView.vue'),
+    meta: { guestOnly: true, hideNav: true },
+  },
+  {
+    path: '/reset-password',
+    name: 'reset-password',
+    component: () => import('@/views/ResetPasswordView.vue'),
+    meta: { hideNav: true },
   },
   {
     path: '/map',
@@ -110,6 +182,29 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
+  if (to.path.startsWith('/dashboard')) {
+    if (!dashboardAuthReady.value) await initDashboardAuth()
+
+    if (to.meta.requiresDashboardAuth && !isDashboardAuthenticated.value) {
+      return { name: 'dashboard-login', query: { redirect: to.fullPath } }
+    }
+
+    if (to.meta.dashboardGuestOnly && isDashboardAuthenticated.value) {
+      return { name: 'dashboard-home' }
+    }
+
+    const allowedRoles = to.meta.dashboardRoles
+    if (
+      isDashboardAuthenticated.value &&
+      Array.isArray(allowedRoles) &&
+      !allowedRoles.includes(dashboardRole.value)
+    ) {
+      return { name: 'dashboard-login', query: { denied: '1' } }
+    }
+
+    return true
+  }
+
   // The session must be resolved before we can judge access.
   if (!authReady.value) await initAuth()
 

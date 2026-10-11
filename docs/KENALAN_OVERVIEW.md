@@ -4,8 +4,9 @@ Dokumen hidup untuk prototype **Kenalan** (NFC keychain + aplikasi sosial kampus
 Isinya: apa yang sudah terbangun dan bagaimana tiap flow bekerja.
 
 > Status: **prototype frontend**. Jalan penuh di _demo mode_ (mock lokal) tanpa
-> backend. Catatan penting: migrasi SQL di `supabase/` **masih versi lama** dan
-> belum disinkronkan dengan perubahan terbaru (lihat [bagian 10](#10-status-sinkronisasi-sql)).
+> backend. Migrasi sinkronisasi member API sudah tersedia di
+> `20261011210000_app_api_contract_security.sql`; belum dijalankan atau
+> diverifikasi pada proyek Supabase nyata.
 
 ---
 
@@ -40,9 +41,11 @@ Kenalan menghilangkan momen canggung "tukar IG" dengan satu tap fisik:
 
 **Demo mode**: kalau `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` kosong,
 `src/lib/api.js` otomatis melayani data dari `src/lib/mockData.js`
-(ter-_persist_ ke `localStorage`, key `kenalan.demo.v4`).
+(ter-_persist_ ke `localStorage`, key `kenalan.demo.v8`). Dashboard punya mode
+demo dan sesi terpisah dari akun pengguna aplikasi.
 
 Kredensial demo: `demo@kenalan.id` / `kenalan123` (atau tombol satu-tap di login).
+Kredensial admin demo: `admin@kenalan.id` / `kenalan123` di `/dashboard/login`.
 
 ---
 
@@ -67,6 +70,28 @@ Kredensial demo: `demo@kenalan.id` / `kenalan123` (atau tombol satu-tap di login
 
 Guard (`src/router/index.js`): `requiresAuth` → `/login?redirect=`; `guestOnly`
 honour `?redirect=`; `/user/:id` milik sendiri → redirect ke `/profile`.
+
+### Dashboard admin
+
+Panel internal punya layout desktop tersendiri (bukan frame ponsel) di prefix
+`/dashboard`:
+
+| Path | Fungsi |
+|---|---|
+| `/dashboard/login` | Login admin; demo memakai `admin@kenalan.id` / `kenalan123` |
+| `/dashboard/home` | Ringkasan metrik, laporan dan pengguna terbaru |
+| `/dashboard/users` | Direktori, pencarian dan paginasi pengguna |
+| `/dashboard/users/:userId` | Detail profil dengan data kontak privat disembunyikan |
+| `/dashboard/nfc-tokens` | Inventaris dan pembuatan token |
+| `/dashboard/stamps` | Moderasi baca-saja tanpa koordinat presisi |
+| `/dashboard/reports` | Antrean laporan dan status penanganan |
+
+Sesi auth dashboard memakai Supabase client/storage key terpisah dari sesi app.
+Saat Supabase dikonfigurasi, role berasal dari tabel `dashboard_admins`; user
+app biasa tidak otomatis mendapat akses. Migrasi terkait:
+`supabase/migrations/20261011090000_dashboard_admin.sql`. Migrasi belum
+menyinkronkan seluruh skema Supabase app pengguna. Dashboard tetap memakai
+mode dummy sampai `VITE_DASHBOARD_USE_SUPABASE=true` di `.env`.
 
 ---
 
@@ -127,7 +152,7 @@ Edit Profil.
   StampLocationModal.
 - **Badge lokasi bisa diklik** → buka **StampLocationModal**: peta mini Leaflet
   (`readonly`) berisi marker stamp + marker kamu, plus ringkasan jarak + arah
-  (`distance_m` + `bearing_deg`). Kalau kamu aktifkan lokasi (geolocation),
+  yang dihitung dinamis dari koordinat. Kalau kamu aktifkan lokasi (geolocation),
   titikmu jadi biru + berdenyut dan muncul petunjuk arah ("ke arah Timur Laut").
   Modal yang sama dipakai di StampThreadView — **sekarang pakai peta Leaflet
   betulan** (StampMap mode `readonly`), bukan radar statis lagi.
@@ -212,16 +237,17 @@ Edit Profil.
 
 ---
 
-## 8. Model Data (demo mode, `mockData.js`, key `kenalan.demo.v5`)
+## 8. Model Data (demo mode, `mockData.js`, key `kenalan.demo.v8`)
 
 - `profiles` — `is_discoverable`; `stamp_history_public`; kontak `whatsapp` +
   `line` (selain `instagram`/`linkedin`/`spotify`); `social_visibility` (map
   per-jenis: `public`|`mutual`|`off`); `avatar_url` kini bisa berisi data URL
   hasil upload (demo).
 - `nfc_tokens` — token keychain (unclaimed/claimed).
-- `location_stamps` — **tanpa** `spot_id`; punya `location_label`, `distance_m`,
-  `bearing_deg`, `lat`, `lng` (koordinat untuk peta Leaflet), `image_url`,
+- `location_stamps` — **tanpa** `spot_id`; punya `location_label`, `lat`, `lng`
+  (koordinat perkiraan untuk peta Leaflet), `image_url`,
   `audience` (`public`|`mutual`, default `public`), `expires_at` (24 jam).
+  Jarak dan bearing dihitung dinamis dari koordinat viewer/stamp, tidak disimpan.
   Beberapa stamp `u-raka` sengaja berumur beberapa hari untuk mengisi History 30
   hari; st-1 & st-5 di-seed `mutual` untuk demo. Semua di-seed di sekitar
   `CAMPUS_CENTER` (konstanta di `mockData.js`).
@@ -241,60 +267,50 @@ Konstanta sosial di `src/lib/socials.js` (`SOCIAL_NETWORKS`,
 
 ```
 src/
-├── lib/            supabase, api, mockData, colorCodes, socials, time,
+├── lib/            supabase, api, dashboardApi, mockData, colorCodes, socials, time,
 │                   useGeolocation, pendingToken   (icebreakers.js DIHAPUS)
-├── stores/         auth, toast
+├── stores/         auth, dashboardAuth, toast
+├── layouts/        DashboardLayout
 ├── router/         index.js (+ guards)
 ├── components/     BottomNav(4 tab), ColorCodeBadge/Picker, LocationStampCard,
 │                   StampMap(Leaflet), StampLocationModal, BottomSheet, AppHeader,
 │                   SocialLinks, StateBlock, ToastHost, UserAvatar
 ├── views/          Onboarding, Login, Profile, Map, StampThread, StampHistory,
-│                   Explore, Mutualan, EditProfile, Landing, NotFound
+│                   Explore, Mutualan, EditProfile, Dashboard*, Landing, NotFound
 └── App.vue         frame mobile tinggi-tetap (header + nav pinned)
-supabase/           ⚠️ masih skema LAMA — lihat bagian 10
+supabase/           migrations app + dashboard admin
 ```
 
-Prinsip: **view hanya memanggil `src/lib/api.js`**.
+Prinsip: view app memakai `src/lib/api.js`; panel admin memakai
+`src/lib/dashboardApi.js` agar query dashboard dan sesi admin tetap terpisah.
 
 ---
 
 ## 10. Status Sinkronisasi SQL
 
-⚠️ **Penting.** Perubahan ronde ini hanya menyentuh frontend + demo mode. File di
-`supabase/` **belum diperbarui** dan sekarang tidak sinkron dengan model data baru:
+Migrasi `20261011210000_app_api_contract_security.sql` menyinkronkan schema
+member API setelah migrasi awal dan dashboard. Isinya:
 
-Yang perlu ditambahkan/diubah di migrasi Supabase sebelum backend dipakai:
-- `profiles`: `is_discoverable boolean default true`;
-  `stamp_history_public boolean default false`; kontak `whatsapp text`,
-  `line text`; dan `social_visibility jsonb` (map per-jenis `public|mutual|off`).
-- **Avatar upload**: butuh Storage bucket untuk foto profil + `avatar_url`
-  menyimpan URL publiknya (sekarang demo menyimpan data URL di baris profil —
-  jangan dipakai di DB nyata karena berat).
-- **History publik**: RLS `location_stamps` perlu mengizinkan non-pemilik
-  membaca stamp milik user yang `stamp_history_public = true`.
-- `location_stamps`: hapus `spot_id`; tambah `location_label text`,
-  `distance_m numeric`, `bearing_deg numeric`, `lat double precision`,
-  `lng double precision`, `image_url text`,
-  `audience text default 'public' check (audience in ('public','mutual'))`.
-  (Untuk query "di dekat saya" yang efisien, pertimbangkan PostGIS `geography`
-  + index GiST alih-alih lat/lng mentah.)
-- **Audiens mutual-only**: idealnya ditegakkan di server (RLS/RPC yang
-  menyembunyikan stamp `mutual` dari non-mutual), bukan difilter di klien seperti
-  sekarang — kalau tidak, baris mutual-only tetap terkirim ke klien lewat network.
-- Tabel baru: `stamp_replies`, `blocks`, `reports`.
-- Hapus tabel `spots` (atau biarkan tak terpakai).
-- RLS: `stamp_replies` (baca user login; tulis pemilik baris);
-  `blocks`/`reports` (hanya pemilik baris); `mutuals` **delete** oleh salah satu
-  peserta (untuk fitur Putuskan mutual).
-- **Visibilitas sosmed `mutual`**: idealnya ditegakkan di server (view/RLS/RPC
-  yang menyembunyikan kolom kontak dari non-mutual), bukan cuma di `SocialLinks`.
-  Kalau tetap kirim semua kolom ke klien, nilai `mutual`/`off` masih bocor via
-  network — jadi untuk produksi perlu kolom kontak di tabel/ęksposur terpisah.
-- Trigger/aturan **kuota PING** (maks 5 pending) di sisi DB — saat ini hanya
-  dijaga di klien.
-- Storage bucket untuk foto stamp.
+- Konversi stamp dari `spot_id` ke `location_label`, `image_url`, koordinat
+  perkiraan dan `audience`; hapus kolom jarak/bearing yang bersifat dinamis.
+- Buat `stamp_replies` dan `blocks`, lengkap dengan FK, indeks, grants dan RLS.
+- Batasi proyeksi kolom profil yang dapat dibaca langsung. Handle sosial/kontak
+  hanya dikembalikan melalui RPC yang menerapkan visibility `public`/`mutual`/
+  `off`; update kontak dilakukan melalui RPC owner-only.
+- Terapkan RLS untuk audience stamp, history publik 30 hari, dan akses replies.
+- Terapkan kuota lima PING pending secara atomik di database; blokir membatalkan
+  PING pending dua arah, dan trigger/RPC menolak PING yang melanggar blokir.
+- Bulatkan koordinat stamp server-side ke empat angka desimal; jarak dan arah
+  dihitung di perangkat viewer dan tidak disimpan.
 
-Bilang saja kalau mau aku lanjut membuat migrasi SQL baru untuk menyinkronkan ini.
+Belum ada migrasi yang dijalankan, jadi kontrak ini belum diverifikasi terhadap
+instance Supabase aktual. Sebelum mengaktifkan `VITE_SUPABASE_URL` dan anon key,
+terapkan semua migrasi secara berurutan pada proyek uji dan lakukan validasi
+akses sebagai anon, pemilik, mutual, non-mutual, serta moderator/admin.
+
+Foto profil/stamp yang dipilih pada demo masih dapat berupa data URL. Upload
+produksi sebaiknya memakai Supabase Storage dan menyimpan URL, bukan data URL
+besar di kolom database.
 
 ---
 
@@ -305,11 +321,11 @@ Bilang saja kalau mau aku lanjut membuat migrasi SQL baru untuk menyinkronkan in
 - [ ]
 
 ### Pertanyaan terbuka
-- Visibilitas sosmed `mutual`/`off` saat ini ditegakkan di sisi klien
-  (`SocialLinks`). Untuk produksi perlu dipindah ke server — lihat bagian 10.
+- Upload avatar/foto stamp masih menggunakan data URL di demo; alur produksi
+  masih perlu memakai Supabase Storage.
 
 ---
 
-_Catatan verifikasi: `npm run build` lolos (1760 modules, demo key `v8`). Peta
-Leaflet: atribusi OSM diperkecil (tetap ada demi lisensi), z-index di-cap biar
-tak menimpa modal, ada tombol fullscreen, modal thread pakai Leaflet. SQL belum dijalankan._
+_Catatan: build dan migrasi untuk perubahan dashboard ini belum dijalankan sesuai
+permintaan. Peta Leaflet mempertahankan atribusi OSM demi lisensi; migrasi
+Supabase dashboard juga belum diterapkan._

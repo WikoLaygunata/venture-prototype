@@ -1,10 +1,9 @@
 /**
  * useGeolocation — thin wrapper over the browser Geolocation API.
  *
- * The prototype doesn't have real coordinates for stamps (they carry a
- * precomputed distance + bearing instead), so this is used purely to tell
- * whether the viewer has location turned on. When active, the mini map can
- * render a live "you" dot and the UI can hint at direction.
+ * Stamps carry approximate coordinates; distance and direction are computed
+ * dynamically on-device. When active, the mini map can render a live "you" dot
+ * and the UI can hint at distance and direction.
  *
  * State:
  *   status  'idle' | 'prompting' | 'active' | 'denied' | 'unsupported'
