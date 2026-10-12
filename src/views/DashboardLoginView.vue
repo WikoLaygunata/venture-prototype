@@ -34,7 +34,7 @@ async function submit() {
 </script>
 
 <template>
-  <main class="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#f5f7f8] px-5 py-12">
+  <main class="relative flex min-h-[100dvh] items-center justify-center overflow-hidden bg-[#f5f7f8] px-5 py-12">
     <div class="pointer-events-none absolute -left-24 -top-24 h-80 w-80 rounded-full bg-kenalan-100/70 blur-3xl" />
     <div class="pointer-events-none absolute -bottom-32 -right-20 h-96 w-96 rounded-full bg-emerald-100/60 blur-3xl" />
 

@@ -108,7 +108,7 @@ async function showThread(stamp) {
     </section>
 
     <div v-if="selectedStamp" class="fixed inset-0 z-50 grid place-items-center bg-slate-950/45 p-4" @click.self="selectedStamp = null">
-      <section class="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
+      <section class="flex max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
         <header class="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
           <div>
             <h2 class="text-base font-extrabold text-slate-900">Thread Location Stamp</h2>

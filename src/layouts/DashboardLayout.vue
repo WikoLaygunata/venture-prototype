@@ -57,7 +57,7 @@ async function logout() {
 </script>
 
 <template>
-  <div class="flex h-screen overflow-hidden bg-[#f5f7f8] text-slate-800">
+  <div class="flex h-[100dvh] overflow-hidden bg-[#f5f7f8] text-slate-800">
     <div
       v-if="menuOpen"
       class="fixed inset-0 z-30 bg-slate-950/30 lg:hidden"
