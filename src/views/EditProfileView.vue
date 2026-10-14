@@ -20,6 +20,7 @@ import {
   SOCIAL_VISIBILITY_OPTIONS,
   defaultSocialVisibility,
 } from '@/lib/socials'
+import { uploadImageToBucket } from '@/lib/storage'
 import { currentUserId, setProfile } from '@/stores/auth'
 import { toast } from '@/stores/toast'
 
@@ -28,6 +29,7 @@ const router = useRouter()
 const loading = ref(true)
 const loadError = ref('')
 const saving = ref(false)
+const uploadingAvatar = ref(false)
 
 const form = reactive({
   full_name: '',
@@ -116,30 +118,41 @@ const preview = computed(() => ({
 const status = computed(() => getColorCode(form.color_code))
 
 /**
- * Avatar upload — demo only. Reads the picked file into a data URL kept on the
- * form (and shown in the live preview). No upload backend yet; wiring this to
- * Supabase Storage later means swapping this handler for an upload call.
+ * Avatar upload — kompresi otomatis ke WebP (< 200KB) menggunakan browser-image-compression
+ * dan upload ke bucket Supabase Storage 'profile'.
  */
-function onPickAvatar(event) {
+async function onPickAvatar(event) {
   const file = event.target.files?.[0]
   if (!file) return
   if (!file.type.startsWith('image/')) {
     toast.error('File harus berupa gambar.')
     return
   }
-  if (file.size > 5 * 1024 * 1024) {
-    toast.error('Foto maksimal 5MB.')
+  if (file.size > 15 * 1024 * 1024) {
+    toast.error('Foto maksimal 15MB.')
     return
   }
-  const reader = new FileReader()
-  reader.onload = () => (form.avatar_url = String(reader.result))
-  reader.readAsDataURL(file)
-  // allow re-picking the same file later
-  event.target.value = ''
+
+  uploadingAvatar.value = true
+  try {
+    const { url, sizeKb } = await uploadImageToBucket('profile', file, currentUserId.value)
+    form.avatar_url = url
+    toast.success(`Foto profil siap (${sizeKb} KB, WebP) ✨`)
+  } catch (error) {
+    toast.error(error.message || 'Gagal mengunggah foto profil.')
+  } finally {
+    uploadingAvatar.value = false
+    // izinkan memilih file yang sama lagi jika perlu
+    event.target.value = ''
+  }
 }
 
 const canSave = computed(
-  () => form.full_name.trim().length >= 3 && form.username.trim().length >= 3 && !saving.value,
+  () =>
+    form.full_name.trim().length >= 3 &&
+    form.username.trim().length >= 3 &&
+    !saving.value &&
+    !uploadingAvatar.value,
 )
 
 async function save() {
@@ -262,13 +275,29 @@ async function save() {
               <div class="flex items-center gap-4">
                 <UserAvatar :profile="preview" size="lg" ring />
                 <div class="min-w-0 flex-1 space-y-2">
-                  <label class="btn-secondary w-full cursor-pointer !py-2.5 !text-[13px]">
-                    <Upload class="h-4 w-4" aria-hidden="true" />
-                    {{ hasCustomPhoto ? 'Ganti foto' : 'Upload foto sendiri' }}
-                    <input type="file" accept="image/*" class="sr-only" @change="onPickAvatar" />
+                  <label
+                    class="btn-secondary w-full cursor-pointer !py-2.5 !text-[13px]"
+                    :class="{ 'opacity-60 pointer-events-none': uploadingAvatar }"
+                  >
+                    <LoaderCircle v-if="uploadingAvatar" class="h-4 w-4 animate-spin text-kenalan-600" />
+                    <Upload v-else class="h-4 w-4" aria-hidden="true" />
+                    {{
+                      uploadingAvatar
+                        ? 'Mengompres & upload…'
+                        : hasCustomPhoto
+                          ? 'Ganti foto'
+                          : 'Upload foto sendiri'
+                    }}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      class="sr-only"
+                      :disabled="uploadingAvatar"
+                      @change="onPickAvatar"
+                    />
                   </label>
                   <button
-                    v-if="form.avatar_url"
+                    v-if="form.avatar_url && !uploadingAvatar"
                     type="button"
                     class="btn-ghost w-full !py-2 !text-[12px] !text-blush-deep"
                     @click="form.avatar_url = ''"
@@ -279,7 +308,7 @@ async function save() {
                 </div>
               </div>
               <p class="mt-1.5 text-[11px] leading-relaxed text-slate-400">
-                Prototype: foto disimpan sementara di memori (belum ke server). Maks 5MB.
+                Foto dikompres otomatis ke WebP (&lt; 200KB) dan diunggah ke bucket storage <code>profile</code>.
               </p>
             </div>
 

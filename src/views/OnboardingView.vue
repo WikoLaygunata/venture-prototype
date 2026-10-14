@@ -12,7 +12,7 @@
  *   status 'claimed'  -> auto-redirect to /user/:user_id (that keychain has an owner)
  *   status 'unclaimed'-> registration form with the token prefilled + disabled
  */
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowRight,
@@ -23,6 +23,7 @@ import {
   Lock,
   Mail,
   Nfc,
+  RefreshCw,
   ScanLine,
   Sparkles,
   UserRound,
@@ -30,6 +31,7 @@ import {
 
 import { fetchNfcToken } from '@/lib/api'
 import { isDemoMode } from '@/lib/dataMode'
+import { supabase } from '@/lib/supabase'
 import { signUp } from '@/stores/auth'
 import { toast } from '@/stores/toast'
 
@@ -41,6 +43,17 @@ const phase = ref('checking')
 const tokenRecord = ref(null)
 const lookupError = ref('')
 const manualToken = ref('')
+
+const registeredEmail = ref('')
+const registeredToken = ref('')
+const hasDirectSession = ref(false)
+const resending = ref(false)
+const resendCountdown = ref(0)
+let resendTimer = null
+
+onBeforeUnmount(() => {
+  if (resendTimer) clearInterval(resendTimer)
+})
 
 const form = reactive({
   fullName: '',
@@ -141,6 +154,36 @@ const canSubmit = computed(
     !submitting.value,
 )
 
+async function handleResendEmail() {
+  if (resending.value || resendCountdown.value > 0 || !registeredEmail.value) return
+  resending.value = true
+  try {
+    if (isDemoMode.value) {
+      toast.success('Email verifikasi simulasi berhasil dikirim ulang!')
+    } else if (supabase) {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: registeredEmail.value,
+      })
+      if (error) throw error
+      toast.success('Email verifikasi baru telah dikirimkan ke kotak masukmu!')
+    }
+    resendCountdown.value = 60
+    if (resendTimer) clearInterval(resendTimer)
+    resendTimer = setInterval(() => {
+      if (resendCountdown.value > 0) {
+        resendCountdown.value--
+      } else {
+        clearInterval(resendTimer)
+      }
+    }, 1000)
+  } catch (error) {
+    toast.error(`Gagal mengirim ulang: ${error.message}`)
+  } finally {
+    resending.value = false
+  }
+}
+
 async function handleRegister() {
   if (!canSubmit.value) return
 
@@ -159,13 +202,17 @@ async function handleRegister() {
       bio: form.bio.trim(),
     })
 
-    if (needsEmailConfirmation) {
-      phase.value = 'done'
-      return
-    }
+    registeredEmail.value = form.email.trim()
+    registeredToken.value = token.value
+    hasDirectSession.value = !needsEmailConfirmation
 
-    toast.success(`Keychain ${token.value} aktif! Selamat datang, ${form.fullName.split(' ')[0]} 🎉`)
-    router.replace({ name: 'profile' })
+    // Selalu arahkan ke tampilan verifikasi email agar pengguna tahu langkah berikutnya
+    phase.value = 'done'
+    if (needsEmailConfirmation) {
+      toast.info('Pendaftaran berhasil! Silakan cek kotak masuk emailmu.')
+    } else {
+      toast.success(`Akun berhasil dibuat! Selamat datang, ${form.fullName.split(' ')[0]} 🎉`)
+    }
   } catch (error) {
     formError.value = error.message
   } finally {
@@ -190,7 +237,9 @@ async function handleRegister() {
             ? 'Aktifkan keychain kamu'
             : phase === 'claimed'
               ? 'Keychain ini sudah punya pemilik'
-              : 'Scan terdeteksi'
+              : phase === 'done'
+                ? 'Verifikasi email kamu ✉️'
+                : 'Scan terdeteksi'
         }}
       </h1>
       <p class="mt-1.5 text-sm leading-relaxed text-white/80">
@@ -199,16 +248,18 @@ async function handleRegister() {
             ? 'Satu langkah lagi buat jadi bagian dari jaringan kampus.'
             : phase === 'claimed'
               ? 'Kami arahkan kamu ke profil pemiliknya.'
-              : 'Kami sedang mencocokkan tag NFC dengan database.'
+              : phase === 'done'
+                ? 'Tautan aktivasi telah dikirimkan ke kotak masuk emailmu.'
+                : 'Kami sedang mencocokkan tag NFC dengan database.'
         }}
       </p>
 
       <div
-        v-if="token"
+        v-if="token || registeredToken"
         class="mt-4 inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1.5 font-mono text-xs font-bold tracking-wider ring-1 ring-white/25"
       >
         <ScanLine class="h-3.5 w-3.5" aria-hidden="true" />
-        {{ token }}
+        {{ token || registeredToken }}
       </div>
     </div>
 
@@ -308,18 +359,103 @@ async function handleRegister() {
       </div>
 
       <!-- ------------------------------------------- email confirmation state -->
-      <div v-else-if="phase === 'done'" class="flex flex-col items-center gap-3 py-14 text-center">
-        <CircleCheck class="h-10 w-10 text-mint" aria-hidden="true" />
-        <p class="text-base font-extrabold text-slate-700">Akun kamu sudah dibuat!</p>
-        <p class="max-w-[17rem] text-xs leading-relaxed text-slate-400">
-          Kami kirim link konfirmasi ke <strong>{{ form.email }}</strong>. Keychain
-          <strong class="font-mono">{{ token }}</strong> sudah diamankan untuk akun ini dan akan
-          aktif setelah kamu menyelesaikan konfirmasi email.
-        </p>
-        <RouterLink :to="{ name: 'login' }" class="btn-primary mt-2">
-          Ke halaman login
-          <ArrowRight class="h-4 w-4" aria-hidden="true" />
-        </RouterLink>
+      <div v-else-if="phase === 'done'" class="space-y-6 py-2">
+        <div class="flex flex-col items-center text-center">
+          <div
+            class="relative flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-tr from-kenalan-500 to-fuchsia-500 text-white shadow-xl shadow-kenalan-500/25 ring-8 ring-kenalan-50"
+          >
+            <Mail class="h-10 w-10 animate-pulse" aria-hidden="true" />
+            <div
+              class="absolute -right-1.5 -top-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500 text-white shadow-md ring-2 ring-white"
+            >
+              <CircleCheck class="h-4 w-4" />
+            </div>
+          </div>
+
+          <h2 class="mt-5 text-xl font-extrabold text-slate-800">
+            Cek Kotak Masuk Email Kamu
+          </h2>
+          <p class="mt-1 text-xs text-slate-500">
+            Kami telah mengirimkan tautan konfirmasi akun ke:
+          </p>
+          <div
+            class="mt-2.5 inline-flex items-center gap-2 rounded-full border border-kenalan-200 bg-kenalan-50 px-4 py-1.5 shadow-sm"
+          >
+            <Mail class="h-3.5 w-3.5 text-kenalan-600" />
+            <span class="text-xs font-bold text-kenalan-800">{{ registeredEmail || form.email }}</span>
+          </div>
+        </div>
+
+        <!-- Panduan langkah-langkah verifikasi -->
+        <div class="rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4 space-y-3">
+          <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+            Langkah Selanjutnya
+          </p>
+          <ol class="space-y-2.5 text-xs text-slate-600">
+            <li class="flex items-start gap-2.5">
+              <span
+                class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-kenalan-500 font-bold text-white text-[10px]"
+              >1</span>
+              <span>Buka aplikasi email kamu dan cari pesan dari <strong class="text-slate-800">Kenalan / Supabase</strong>.</span>
+            </li>
+            <li class="flex items-start gap-2.5">
+              <span
+                class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-kenalan-500 font-bold text-white text-[10px]"
+              >2</span>
+              <span>Klik tombol atau tautan <strong class="text-slate-800">"Confirm your email"</strong> di dalam pesan tersebut.</span>
+            </li>
+            <li class="flex items-start gap-2.5">
+              <span
+                class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-kenalan-500 font-bold text-white text-[10px]"
+              >3</span>
+              <span>Setelah diverifikasi, keychain <code class="rounded bg-slate-200 px-1 py-0.5 font-mono font-bold text-kenalan-700">{{ registeredToken || token }}</code> akan aktif dan kamu bisa langsung masuk.</span>
+            </li>
+          </ol>
+        </div>
+
+        <!-- Tips Spam/Junk Folder -->
+        <div class="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50/70 p-3.5 text-amber-800">
+          <CircleAlert class="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden="true" />
+          <p class="text-[11px] leading-relaxed">
+            Belum menerima email? Tunggu 1–2 menit, dan pastikan juga mengecek folder <strong>Spam / Junk</strong> atau tab Promosi di email kamu.
+          </p>
+        </div>
+
+        <!-- Tombol Aksi -->
+        <div class="space-y-2.5 pt-2">
+          <RouterLink
+            v-if="hasDirectSession"
+            :to="{ name: 'profile' }"
+            class="btn-primary w-full !py-3.5"
+          >
+            Buka Profil Saya
+            <ArrowRight class="h-4 w-4" aria-hidden="true" />
+          </RouterLink>
+
+          <RouterLink
+            :to="{ name: 'login' }"
+            :class="hasDirectSession ? 'btn-secondary' : 'btn-primary'"
+            class="w-full !py-3.5"
+          >
+            Ke Halaman Login
+            <ArrowRight class="h-4 w-4" aria-hidden="true" />
+          </RouterLink>
+
+          <button
+            type="button"
+            class="btn-secondary w-full !py-3 text-xs"
+            :disabled="resending || resendCountdown > 0"
+            @click="handleResendEmail"
+          >
+            <LoaderCircle v-if="resending" class="h-3.5 w-3.5 animate-spin" />
+            <RefreshCw v-else class="h-3.5 w-3.5" :class="resending ? 'animate-spin' : ''" />
+            {{
+              resendCountdown > 0
+                ? `Kirim ulang tersedia dalam ${resendCountdown} detik`
+                : 'Kirim ulang email verifikasi'
+            }}
+          </button>
+        </div>
       </div>
 
       <!-- ------------------------------------------------- registration form -->

@@ -38,6 +38,7 @@ import UserAvatar from '@/components/UserAvatar.vue'
 
 import { createStamp, deleteStamp, fetchRecentStamps, sendPing } from '@/lib/api'
 import { getStampAudiencePref, setStampAudiencePref } from '@/lib/mockData'
+import { uploadImageToBucket } from '@/lib/storage'
 import { useGeolocation } from '@/lib/useGeolocation'
 import { currentProfile, currentUserId } from '@/stores/auth'
 import { toast } from '@/stores/toast'
@@ -103,27 +104,41 @@ function openStampSheet() {
   stampSheetOpen.value = true
 }
 
-const canStamp = computed(() => stampForm.value.message.trim().length >= 4 && !savingStamp.value)
+const uploadingImage = ref(false)
+const canStamp = computed(
+  () =>
+    stampForm.value.message.trim().length >= 4 &&
+    !savingStamp.value &&
+    !uploadingImage.value,
+)
 
 /**
- * Demo image handling: read the picked file to a data URL so a thumbnail shows
- * without any upload backend. Against Supabase you'd upload to Storage and keep
- * the public URL instead.
+ * Image upload — kompresi otomatis ke WebP (< 200KB) menggunakan browser-image-compression
+ * dan upload ke bucket Supabase Storage 'stamp'.
  */
-function onPickImage(event) {
+async function onPickImage(event) {
   const file = event.target.files?.[0]
   if (!file) return
   if (!file.type.startsWith('image/')) {
     toast.error('File harus berupa gambar.')
     return
   }
-  if (file.size > 5 * 1024 * 1024) {
-    toast.error('Gambar maksimal 5MB.')
+  if (file.size > 15 * 1024 * 1024) {
+    toast.error('Gambar maksimal 15MB.')
     return
   }
-  const reader = new FileReader()
-  reader.onload = () => (stampForm.value.imageUrl = String(reader.result))
-  reader.readAsDataURL(file)
+
+  uploadingImage.value = true
+  try {
+    const { url, sizeKb } = await uploadImageToBucket('stamp', file, currentUserId.value)
+    stampForm.value.imageUrl = url
+    toast.success(`Foto stamp siap (${sizeKb} KB, WebP) 📸`)
+  } catch (error) {
+    toast.error(error.message || 'Gagal mengunggah foto stamp.')
+  } finally {
+    uploadingImage.value = false
+    event.target.value = ''
+  }
 }
 
 async function submitStamp() {
@@ -494,12 +509,19 @@ function openProfile(userId) {
               <X class="h-4 w-4" aria-hidden="true" />
             </button>
           </div>
+          <div
+            v-else-if="uploadingImage"
+            class="flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-kenalan-300 bg-kenalan-50/60 py-6 text-kenalan-600"
+          >
+            <LoaderCircle class="h-6 w-6 animate-spin text-kenalan-500" aria-hidden="true" />
+            <span class="text-xs font-semibold">Mengompres ke WebP & mengunggah…</span>
+          </div>
           <label
             v-else
             class="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 py-6 text-slate-400 transition hover:border-kenalan-300 hover:text-kenalan-500"
           >
             <ImagePlus class="h-6 w-6" aria-hidden="true" />
-            <span class="text-xs font-semibold">Tambah foto</span>
+            <span class="text-xs font-semibold">Tambah foto (WebP &lt; 200KB)</span>
             <input type="file" accept="image/*" class="sr-only" @change="onPickImage" />
           </label>
         </div>

@@ -315,6 +315,7 @@ function translateAuthError(message = '') {
   if (m.includes('nfc_token_invalid')) return 'Token NFC sudah digunakan atau tidak valid.'
   if (m.includes('username_taken')) return 'Username ini sudah dipakai.'
   if (m.includes('invalid login credentials')) return 'Email atau password salah.'
+  if (m.includes('email not confirmed')) return 'Email belum diverifikasi. Silakan periksa inbox atau spam email Anda untuk mengonfirmasi akun.'
   if (m.includes('already registered')) return 'Email ini sudah terdaftar. Coba login.'
   if (m.includes('password should be at least')) return 'Password belum memenuhi panjang minimum.'
   if (m.includes('email rate limit')) return 'Terlalu banyak percobaan. Tunggu sebentar ya.'
