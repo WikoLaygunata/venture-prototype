@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowLeft, LoaderCircle, LockKeyhole, Mail } from 'lucide-vue-next'
 import { requestPasswordReset } from '@/stores/auth'
-import { isSupabaseConfigured } from '@/lib/supabase'
+import { isDemoMode } from '@/lib/dataMode'
 
 const router = useRouter()
 const email = ref('')
@@ -40,9 +40,9 @@ async function submit() {
     <div v-if="sent" class="rounded-3xl border border-mint/40 bg-mint-soft p-5 text-sm leading-relaxed text-mint-deep" role="status">
       <p class="font-bold">Instruksi pemulihan siap</p>
       <p class="mt-2 text-xs">
-        {{ isSupabaseConfigured ? 'Jika email terdaftar, link pemulihan akan dikirim.' : 'Mode demo tidak mengirim email. Lanjutkan ke form reset untuk mensimulasikan pemulihan akun.' }}
+        {{ isDemoMode ? 'Mode demo tidak mengirim email. Lanjutkan ke form reset untuk mensimulasikan pemulihan akun.' : 'Jika email terdaftar, link pemulihan akan dikirim.' }}
       </p>
-      <RouterLink v-if="!isSupabaseConfigured" :to="{ name: 'reset-password' }" class="btn-primary mt-4 w-full !py-3">
+      <RouterLink v-if="isDemoMode" :to="{ name: 'reset-password' }" class="btn-primary mt-4 w-full !py-3">
         Atur password demo
       </RouterLink>
     </div>

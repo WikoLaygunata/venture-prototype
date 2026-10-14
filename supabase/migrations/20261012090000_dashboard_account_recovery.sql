@@ -362,25 +362,9 @@ declare
   v_token text;
   v_base text;
   v_username text;
+  v_suffix integer := 0;
 begin
   v_token := upper(btrim(coalesce(new.raw_user_meta_data ->> 'nfc_token', '')));
-  if v_token = '' then
-    raise exception 'NFC_TOKEN_REQUIRED: pendaftaran memerlukan token NFC yang valid'
-      using errcode = '22023';
-  end if;
-
-  update public.nfc_tokens t
-     set status = 'claimed',
-         user_id = new.id,
-         claimed_at = now()
-   where t.token = v_token
-     and t.status = 'unclaimed'
-  returning t.token into v_token;
-
-  if not found then
-    raise exception 'NFC_TOKEN_INVALID: token tidak valid atau sudah digunakan'
-      using errcode = '22023';
-  end if;
 
   v_base := regexp_replace(
     lower(coalesce(
@@ -393,10 +377,15 @@ begin
   if char_length(v_base) < 3 then v_base := v_base || 'user'; end if;
   v_base := left(v_base, 24);
   v_username := v_base;
-  if exists (select 1 from public.profiles p where p.username = v_username) then
-    raise exception 'USERNAME_TAKEN: username sudah digunakan'
-      using errcode = '23505';
-  end if;
+
+  while exists (select 1 from public.profiles p where p.username = v_username) loop
+    v_suffix := v_suffix + 1;
+    v_username := left(v_base, 20) || v_suffix::text;
+    if v_suffix >= 99 then
+      v_username := left(v_base, 16) || floor(random() * 1000000)::text;
+      exit;
+    end if;
+  end loop;
 
   insert into public.profiles (id, username, full_name, avatar_url, faculty, major, bio)
   values (
@@ -407,8 +396,32 @@ begin
     left(coalesce(new.raw_user_meta_data ->> 'faculty', ''), 120),
     left(coalesce(new.raw_user_meta_data ->> 'major', ''), 120),
     left(coalesce(new.raw_user_meta_data ->> 'bio', ''), 160)
-  );
+  )
+  on conflict (id) do nothing;
+
+  -- Jika registrasi menyertakan token NFC, klaim tokennya
+  if v_token <> '' then
+    update public.nfc_tokens t
+       set status = 'claimed',
+           user_id = new.id,
+           claimed_at = now()
+     where t.token = v_token
+       and t.status = 'unclaimed'
+    returning t.token into v_token;
+
+    if not found then
+      raise exception 'NFC_TOKEN_INVALID: token tidak valid atau sudah digunakan'
+        using errcode = '22023';
+    end if;
+  end if;
 
   return new;
+exception
+  when others then
+    if sqlerrm like '%NFC_TOKEN%' then
+      raise;
+    end if;
+    raise warning '[Kenalan] handle_new_user error for %: %', new.id, sqlerrm;
+    return new;
 end;
 $$;

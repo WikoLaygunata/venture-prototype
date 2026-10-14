@@ -6,7 +6,7 @@
  * you jump straight into each of the three scan scenarios without a physical tag.
  */
 import { ArrowRight, MapPin, Nfc, ScanLine, Sparkles } from 'lucide-vue-next'
-import { isSupabaseConfigured } from '@/lib/supabase'
+import { isDemoMode } from '@/lib/dataMode'
 import { demoDb } from '@/lib/mockData'
 
 const unclaimed = demoDb.nfc_tokens.filter((t) => t.status === 'unclaimed')
@@ -95,7 +95,7 @@ const FEATURES = [
       </ul>
 
       <!-- Prototype shortcuts -->
-      <section v-if="!isSupabaseConfigured" class="mt-8 rounded-3xl bg-white/5 p-4 ring-1 ring-white/10">
+      <section v-if="isDemoMode" class="mt-8 rounded-3xl bg-white/5 p-4 ring-1 ring-white/10">
         <h2 class="text-[11px] font-bold uppercase tracking-wide text-kenalan-200">
           Simulasi scan NFC
         </h2>

@@ -7,7 +7,8 @@
  *
  * Views only ever import from here, so swapping the backend never touches UI code.
  */
-import { supabase, isSupabaseConfigured } from './supabase'
+import { supabase } from './supabase'
+import { isDemoMode } from './dataMode'
 import {
   demoDb,
   persistDemoDb,
@@ -158,7 +159,7 @@ function rpcMessage(error, fallback) {
 export async function fetchNfcToken(token) {
   if (!token) return null
 
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     await fakeDelay()
     const row = demoDb.nfc_tokens.find(
       (t) => t.token.toLowerCase() === String(token).toLowerCase(),
@@ -190,7 +191,7 @@ export async function fetchNfcToken(token) {
  * from `auth.uid()`, so a client cannot claim a keychain on someone else's behalf.
  */
 export async function claimNfcToken(token, userId) {
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     const row = demoDb.nfc_tokens.find(
       (t) => t.token.toLowerCase() === String(token).toLowerCase(),
     )
@@ -221,7 +222,7 @@ export async function claimNfcToken(token, userId) {
 export async function fetchProfile(userId) {
   if (!userId) return null
 
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     await fakeDelay()
     const found = findProfile(userId)
     return found ? { ...found } : null
@@ -238,7 +239,7 @@ export async function fetchProfile(userId) {
 }
 
 export async function createProfile(profile) {
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     const row = {
       color_code: DEFAULT_COLOR_CODE,
       interests: [],
@@ -271,7 +272,7 @@ export async function createProfile(profile) {
 }
 
 export async function updateProfile(userId, patch) {
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     const row = findProfile(userId)
     if (!row) throw new Error('Profil tidak ditemukan.')
     Object.assign(row, patch)
@@ -333,7 +334,7 @@ export function setStampHistoryPublic(userId, isPublic) {
  * mutual, and are not blocked in either direction.
  */
 export async function fetchRecommendedProfiles(userId, limit = 12) {
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     await fakeDelay()
     const connected = new Set((await fetchMutuals(userId)).map((p) => p.id))
     const blocked = blockedIdsFor(userId)
@@ -392,7 +393,7 @@ function decorateStamp(s) {
  * dynamically from rounded coordinates on the viewer's device.
  */
 export async function fetchRecentStamps(viewerId = null) {
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     await fakeDelay()
     const mutualSet = mutualIdsFor(viewerId)
     return demoDb.location_stamps
@@ -421,7 +422,7 @@ export async function fetchRecentStamps(viewerId = null) {
 export async function fetchStamp(stampId, viewerId = null) {
   if (!stampId) return null
 
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     await fakeDelay(160)
     const found = demoDb.location_stamps.find((s) => s.id === stampId)
     if (!found) return null
@@ -446,7 +447,7 @@ export async function fetchStamp(stampId, viewerId = null) {
 export async function fetchStampHistory(userId, windowMs = STAMP_HISTORY_MS) {
   if (!userId) return []
 
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     await fakeDelay()
     return demoDb.location_stamps
       .filter((s) => s.user_id === userId && isWithin(s.created_at, windowMs))
@@ -508,7 +509,7 @@ export async function createStamp({
           lng: CAMPUS_CENTER.lng + (Math.random() - 0.5) * 0.004,
         }
 
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     const row = {
       id: demoId('st'),
       user_id: userId,
@@ -546,7 +547,7 @@ export async function createStamp({
 }
 
 export async function deleteStamp(stampId, userId) {
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     demoDb.location_stamps = demoDb.location_stamps.filter(
       (s) => !(s.id === stampId && s.user_id === userId),
     )
@@ -571,7 +572,7 @@ export async function deleteStamp(stampId, userId) {
 export async function fetchStampReplies(stampId) {
   if (!stampId) return []
 
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     await fakeDelay(160)
     return demoDb.stamp_replies
       .filter((r) => r.stamp_id === stampId)
@@ -596,7 +597,7 @@ export async function createStampReply({ stampId, userId, message }) {
     throw new Error('Balasan harus berisi 1 sampai 500 karakter.')
   }
 
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     const row = {
       id: demoId('sr'),
       stamp_id: stampId,
@@ -623,7 +624,7 @@ export async function createStampReply({ stampId, userId, message }) {
 /* --------------------------------------------------------------------- pings */
 
 export async function fetchIncomingPings(userId) {
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     await fakeDelay()
     const blocked = blockedIdsFor(userId)
     return demoDb.pings
@@ -651,7 +652,7 @@ export async function fetchIncomingPings(userId) {
 }
 
 export async function fetchSentPings(userId) {
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     await fakeDelay(160)
     return demoDb.pings
       .filter((p) => p.sender_id === userId)
@@ -673,7 +674,7 @@ export async function fetchSentPings(userId) {
 export async function countPendingSentPings(userId) {
   if (!userId) return 0
 
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     return demoDb.pings.filter((p) => p.sender_id === userId && p.status === 'pending').length
   }
 
@@ -695,7 +696,7 @@ export async function sendPing({ senderId, receiverId, message }) {
     throw new Error('Pesan PING harus berisi 1 sampai 220 karakter.')
   }
 
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     if (blockedIdsFor(senderId).has(receiverId)) {
       throw new Error('Kamu nggak bisa kirim PING ke orang ini.')
     }
@@ -760,7 +761,7 @@ export async function sendPing({ senderId, receiverId, message }) {
 export async function hasPendingPing(senderId, receiverId) {
   if (!senderId || !receiverId) return false
 
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     return demoDb.pings.some(
       (p) => p.sender_id === senderId && p.receiver_id === receiverId && p.status === 'pending',
     )
@@ -790,7 +791,7 @@ export async function respondToPing(pingId, status) {
     throw new Error('Status PING tidak valid.')
   }
 
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     const ping = demoDb.pings.find((p) => p.id === pingId)
     if (!ping) throw new Error('PING tidak ditemukan.')
     ping.status = status
@@ -819,7 +820,7 @@ export async function blockUser(blockerId, blockedId) {
     throw new Error('Pengguna tujuan blokir tidak valid.')
   }
 
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     if (!demoDb.blocks.some((b) => b.blocker_id === blockerId && b.blocked_id === blockedId)) {
       demoDb.blocks.push({
         id: demoId('bl'),
@@ -849,7 +850,7 @@ export async function blockUser(blockerId, blockedId) {
 }
 
 export async function unblockUser(blockerId, blockedId) {
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     demoDb.blocks = demoDb.blocks.filter(
       (b) => !(b.blocker_id === blockerId && b.blocked_id === blockedId),
     )
@@ -874,7 +875,7 @@ export async function unblockUser(blockerId, blockedId) {
 export async function fetchBlockedUsers(blockerId) {
   if (!blockerId) return []
 
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     await fakeDelay()
     return demoDb.blocks
       .filter((b) => b.blocker_id === blockerId)
@@ -902,7 +903,7 @@ export async function fetchBlockedUsers(blockerId) {
 export async function isBlocked(blockerId, blockedId) {
   if (!blockerId || !blockedId) return false
 
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     return demoDb.blocks.some((b) => b.blocker_id === blockerId && b.blocked_id === blockedId)
   }
 
@@ -924,7 +925,7 @@ export async function reportUser({ reporterId, reportedId, reason }) {
     throw new Error('Alasan laporan harus berisi 1 sampai 1000 karakter.')
   }
 
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     demoDb.reports.push({
       id: demoId('rp'),
       reporter_id: reporterId,
@@ -970,7 +971,7 @@ function linkMutualInDemo(userAId, userBId) {
 export async function fetchMutualCount(userId) {
   if (!userId) return 0
 
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     return demoDb.mutuals.filter((m) => m.user_a_id === userId || m.user_b_id === userId).length
   }
 
@@ -982,7 +983,7 @@ export async function fetchMutualCount(userId) {
 export async function fetchMutuals(userId) {
   if (!userId) return []
 
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     return demoDb.mutuals
       .filter((m) => m.user_a_id === userId || m.user_b_id === userId)
       .sort(byNewest)
@@ -1016,7 +1017,7 @@ export async function isMutualWith(userId, otherId) {
   if (!userId || !otherId) return false
   const [a, b] = [userId, otherId].sort()
 
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     return demoDb.mutuals.some((m) => m.user_a_id === a && m.user_b_id === b)
   }
 
@@ -1036,7 +1037,7 @@ export async function removeMutual(userId, otherId) {
   if (!userId || !otherId) return false
   const [a, b] = [userId, otherId].sort()
 
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     demoDb.mutuals = demoDb.mutuals.filter((m) => !(m.user_a_id === a && m.user_b_id === b))
     persistDemoDb()
     await fakeDelay(180)

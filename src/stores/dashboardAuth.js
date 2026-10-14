@@ -1,9 +1,6 @@
 import { computed, ref } from 'vue'
-import {
-  dashboardSupabase,
-  isDashboardSupabaseEnabled,
-  isDashboardSupabaseRequested,
-} from '@/lib/supabase'
+import { dashboardSupabase } from '@/lib/supabase'
+import { isDashboardDemoMode } from '@/lib/dashboardMode'
 
 const DEMO_SESSION_KEY = 'kenalan.dashboard.session'
 const DEMO_ADMIN = {
@@ -52,10 +49,7 @@ export async function initDashboardAuth() {
   authError.value = ''
 
   try {
-    if (!isDashboardSupabaseEnabled && isDashboardSupabaseRequested) {
-      throw new Error('Dashboard Supabase diminta, tetapi VITE_SUPABASE_URL atau anon key belum diisi.')
-    }
-    if (!isDashboardSupabaseEnabled) {
+    if (isDashboardDemoMode.value) {
       const stored = localStorage.getItem(DEMO_SESSION_KEY)
       if (stored === DEMO_ADMIN.id) {
         user.value = { id: DEMO_ADMIN.id, email: DEMO_ADMIN.email, name: DEMO_ADMIN.name }
@@ -88,10 +82,7 @@ export async function initDashboardAuth() {
 
 export async function signInDashboard({ email, password }) {
   authError.value = ''
-  if (!isDashboardSupabaseEnabled && isDashboardSupabaseRequested) {
-    throw new Error('Dashboard Supabase diminta, tetapi VITE_SUPABASE_URL atau anon key belum diisi.')
-  }
-  if (!isDashboardSupabaseEnabled) {
+  if (isDashboardDemoMode.value) {
     if (
       String(email).trim().toLowerCase() !== DEMO_ADMIN.email ||
       password !== DEMO_ADMIN.password
@@ -116,7 +107,7 @@ export async function signInDashboard({ email, password }) {
 }
 
 export async function signOutDashboard() {
-  if (!isDashboardSupabaseEnabled) {
+  if (isDashboardDemoMode.value) {
     localStorage.removeItem(DEMO_SESSION_KEY)
   } else {
     const { error } = await dashboardSupabase.auth.signOut()

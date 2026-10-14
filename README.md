@@ -36,3 +36,16 @@ npm run dev
 ```sh
 npm run build
 ```
+
+## Data mode
+
+Choose **Demo** or **Production** on the login page. Demo mode uses seeded mock
+data persisted in the browser; Production sends app data and authentication
+requests to Supabase. The choice is remembered in the browser and takes effect
+after the app reloads. Configure both `VITE_SUPABASE_URL` and
+`VITE_SUPABASE_ANON_KEY` (see `.env.example`) to enable Production mode.
+
+The admin dashboard has its own Demo/Production toggle on `/dashboard/login`.
+Its mode is independent from the app login and is remembered in the browser.
+`VITE_DASHBOARD_USE_SUPABASE=true` makes Supabase the dashboard's initial mode;
+the login toggle can change it afterwards.

@@ -3,7 +3,8 @@ import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowRight, Command, LockKeyhole, ShieldCheck } from 'lucide-vue-next'
 import { dashboardAuthMessage, signInDashboard } from '@/stores/dashboardAuth'
-import { isDashboardSupabaseEnabled, isDashboardSupabaseRequested } from '@/lib/supabase'
+import { isSupabaseConfigured } from '@/lib/supabase'
+import { dashboardDataMode, setDashboardDataMode } from '@/lib/dashboardMode'
 
 const route = useRoute()
 const router = useRouter()
@@ -11,9 +12,19 @@ const email = ref('')
 const password = ref('')
 const loading = ref(false)
 const errorMessage = ref('')
-const showDemoCredentials = computed(
-  () => !isDashboardSupabaseEnabled && !isDashboardSupabaseRequested,
-)
+const modeError = ref('')
+const showDemoCredentials = computed(() => dashboardDataMode.value === 'demo')
+
+function changeMode(mode) {
+  if (mode === dashboardDataMode.value) return
+  modeError.value = ''
+  try {
+    setDashboardDataMode(mode)
+    window.location.reload()
+  } catch (error) {
+    modeError.value = error.message
+  }
+}
 
 async function submit() {
   loading.value = true
@@ -78,6 +89,50 @@ async function submit() {
           <h2 class="mt-2 text-2xl font-extrabold tracking-tight text-slate-900">Masuk ke dashboard</h2>
           <p class="mt-2 text-sm text-slate-500">Gunakan akun admin untuk melanjutkan.</p>
         </div>
+
+        <section class="mb-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <h3 class="text-xs font-extrabold text-slate-800">Pilih mode dashboard</h3>
+          <div class="mt-3 grid grid-cols-2 gap-2" role="radiogroup" aria-label="Mode dashboard admin">
+            <button
+              type="button"
+              role="radio"
+              :aria-checked="dashboardDataMode === 'demo'"
+              class="rounded-xl border px-3 py-2.5 text-left transition"
+              :class="dashboardDataMode === 'demo'
+                ? 'border-kenalan-500 bg-white text-kenalan-700 shadow-sm'
+                : 'border-transparent bg-white/60 text-slate-500'"
+              @click="changeMode('demo')"
+            >
+              <span class="block text-xs font-bold">Demo</span>
+              <span class="mt-0.5 block text-[10px]">Data dummy</span>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              :aria-checked="dashboardDataMode === 'production'"
+              :disabled="!isSupabaseConfigured"
+              class="rounded-xl border px-3 py-2.5 text-left transition disabled:cursor-not-allowed disabled:opacity-50"
+              :class="dashboardDataMode === 'production'
+                ? 'border-kenalan-500 bg-white text-kenalan-700 shadow-sm'
+                : 'border-transparent bg-white/60 text-slate-500'"
+              @click="changeMode('production')"
+            >
+              <span class="block text-xs font-bold">Production</span>
+              <span class="mt-0.5 block text-[10px]">API Supabase</span>
+            </button>
+          </div>
+          <p class="mt-2 text-[11px] leading-relaxed text-slate-500">
+            {{ dashboardDataMode === 'demo'
+              ? 'Dashboard memakai data dummy lokal.'
+              : 'Dashboard memakai autentikasi dan API Supabase.' }}
+          </p>
+          <p v-if="!isSupabaseConfigured" class="mt-2 text-[11px] leading-relaxed text-amber-700">
+            Production tersedia setelah URL dan anon key Supabase dikonfigurasi.
+          </p>
+          <p v-if="modeError" role="alert" class="mt-2 text-xs font-semibold text-rose-700">
+            {{ modeError }}
+          </p>
+        </section>
 
         <form class="space-y-5" @submit.prevent="submit">
           <label class="block">

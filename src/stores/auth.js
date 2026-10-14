@@ -6,7 +6,8 @@
  * app mounts so router guards never see a half-resolved session.
  */
 import { computed, ref } from 'vue'
-import { supabase, isSupabaseConfigured } from '@/lib/supabase'
+import { supabase } from '@/lib/supabase'
+import { isDemoMode } from '@/lib/dataMode'
 import {
   demoDb,
   persistDemoDb,
@@ -56,7 +57,7 @@ export async function initAuth() {
   if (ready.value) return
 
   try {
-    if (!isSupabaseConfigured) {
+    if (isDemoMode.value) {
       userId.value = demoDb.session_user_id ?? null
       await loadProfile(userId.value)
     } else {
@@ -83,7 +84,7 @@ export async function initAuth() {
 /* ----------------------------------------------------------------- mutations */
 
 export async function signIn({ email, password }) {
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     const normalized = String(email).trim().toLowerCase()
 
     // Demo mode accepts the seeded credentials, or any @kenalan.id address
@@ -150,7 +151,7 @@ export async function signUp({
     throw new Error('Token NFC tidak valid atau sudah diklaim.')
   }
 
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     const normalized = String(email).trim().toLowerCase()
     if (demoDb.profiles.some((p) => p.username === username)) {
       throw new Error('Username ini sudah dipakai.')
@@ -232,7 +233,7 @@ export async function requestPasswordReset(email) {
   const normalized = String(email ?? '').trim().toLowerCase()
   if (!/\S+@\S+\.\S+/.test(normalized)) throw new Error('Masukkan alamat email yang valid.')
 
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     demoResetEmail = normalized
     return
   }
@@ -248,7 +249,7 @@ export async function changePassword({ currentPassword, newPassword }) {
     throw new Error('Password baru minimal 8 karakter.')
   }
 
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     if (!userId.value) throw new Error('Silakan masuk terlebih dahulu.')
     if (currentPassword !== getDemoPassword()) throw new Error('Password saat ini tidak cocok.')
     setDemoPassword(newPassword)
@@ -272,7 +273,7 @@ export async function completePasswordReset(newPassword) {
     throw new Error('Password baru minimal 8 karakter.')
   }
 
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     if (!demoResetEmail) throw new Error('Simulasi pemulihan tidak dimulai. Minta link reset terlebih dahulu.')
     setDemoPassword(newPassword)
     demoResetEmail = ''
@@ -287,7 +288,7 @@ export async function completePasswordReset(newPassword) {
 }
 
 export async function signOut() {
-  if (!isSupabaseConfigured) {
+  if (isDemoMode.value) {
     demoDb.session_user_id = null
     persistDemoDb()
   } else {

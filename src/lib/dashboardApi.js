@@ -1,8 +1,7 @@
 import {
   dashboardSupabase,
-  isDashboardSupabaseEnabled,
-  isDashboardSupabaseRequested,
 } from './supabase'
+import { isDashboardDemoMode } from './dashboardMode'
 import { dashboardRole } from '@/stores/dashboardAuth'
 import { demoDb, demoId, fakeDelay, persistDemoDb, setDemoPassword } from './mockData'
 
@@ -45,13 +44,6 @@ function requireDashboardClient() {
   return dashboardSupabase
 }
 
-function isDashboardDemoMode() {
-  if (isDashboardSupabaseRequested && !isDashboardSupabaseEnabled) {
-    throw new Error('Dashboard Supabase diminta, tetapi VITE_SUPABASE_URL atau anon key belum diisi.')
-  }
-  return !isDashboardSupabaseEnabled
-}
-
 function throwQueryError(error, action) {
   if (error) throw new Error(`${action}: ${error.message}`)
 }
@@ -64,7 +56,7 @@ function normalizedSearch(value) {
 }
 
 export async function fetchDashboardSummary() {
-  if (isDashboardDemoMode()) {
+  if (isDashboardDemoMode.value) {
     await fakeDelay(180)
     const now = Date.now()
     const recentUsers = demoDb.profiles.filter(
@@ -137,7 +129,7 @@ export async function fetchDashboardSummary() {
 
 export async function fetchDashboardUsers({ query = '', page = 1, pageSize = 10 } = {}) {
   const safeQuery = normalizedSearch(query)
-  if (isDashboardDemoMode()) {
+  if (isDashboardDemoMode.value) {
     await fakeDelay(150)
     const filtered = demoDb.profiles
       .filter((profile) => {
@@ -173,7 +165,7 @@ export async function fetchDashboardUsers({ query = '', page = 1, pageSize = 10 
 
 export async function fetchDashboardUser(userId) {
   if (!userId) throw new Error('ID pengguna tidak valid.')
-  if (isDashboardDemoMode()) {
+  if (isDashboardDemoMode.value) {
     await fakeDelay()
     const profile = profileFor(userId)
     if (!profile) return null
@@ -239,7 +231,7 @@ export async function administerDashboardUser(userId, changes) {
   if (!changes.email && !changes.password && typeof changes.banned !== 'boolean') {
     throw new Error('Isi minimal satu perubahan akun.')
   }
-  if (isDashboardDemoMode()) {
+  if (isDashboardDemoMode.value) {
     const profile = profileFor(userId)
     if (!profile) throw new Error('Pengguna tidak ditemukan.')
     if (changes.email) profile.admin_email = String(changes.email).trim().toLowerCase()
@@ -266,7 +258,7 @@ export async function administerDashboardUser(userId, changes) {
 
 export async function fetchDashboardTokens({ query = '', status = 'all', page = 1, pageSize = 10 } = {}) {
   const safeQuery = normalizedSearch(query).toLowerCase()
-  if (isDashboardDemoMode()) {
+  if (isDashboardDemoMode.value) {
     await fakeDelay(150)
     const rows = demoDb.nfc_tokens
       .map((token) => ({ ...token, owner: publicAdminProfile(profileFor(token.user_id)) }))
@@ -306,7 +298,7 @@ export async function createDashboardTokens(batchLabel = '', count = 1) {
     throw new Error('Jumlah token harus antara 1 dan 20.')
   }
   const label = String(batchLabel).trim().slice(0, 80)
-  if (isDashboardDemoMode()) {
+  if (isDashboardDemoMode.value) {
     await fakeDelay(180)
     const rows = []
     for (let index = 0; index < safeCount; index += 1) {
@@ -346,7 +338,7 @@ export async function createDashboardTokens(batchLabel = '', count = 1) {
 }
 
 export async function fetchDashboardStamps({ page = 1, pageSize = 10 } = {}) {
-  if (isDashboardDemoMode()) {
+  if (isDashboardDemoMode.value) {
     await fakeDelay(150)
     const rows = [...demoDb.location_stamps]
       .sort(byNewest)
@@ -371,7 +363,7 @@ export async function fetchDashboardStamps({ page = 1, pageSize = 10 } = {}) {
 
 export async function fetchDashboardStampThread(stampId) {
   if (!stampId) throw new Error('ID stamp tidak valid.')
-  if (isDashboardDemoMode()) {
+  if (isDashboardDemoMode.value) {
     await fakeDelay(150)
     const stamp = demoDb.location_stamps.find((item) => item.id === stampId)
     if (!stamp) return null
@@ -407,7 +399,7 @@ function decorateDemoReport(report) {
 }
 
 export async function fetchDashboardReports({ status = 'all', page = 1, pageSize = 10 } = {}) {
-  if (isDashboardDemoMode()) {
+  if (isDashboardDemoMode.value) {
     await fakeDelay(150)
     const rows = [...demoDb.reports]
       .filter((report) => status === 'all' || report.status === status)
@@ -437,7 +429,7 @@ export async function updateDashboardReportStatus(reportId, status) {
   if (!['resolved', 'dismissed'].includes(status)) {
     throw new Error('Status penanganan laporan tidak valid.')
   }
-  if (isDashboardDemoMode()) {
+  if (isDashboardDemoMode.value) {
     const report = demoDb.reports.find((row) => row.id === reportId)
     if (!report) throw new Error('Laporan tidak ditemukan.')
     report.status = status

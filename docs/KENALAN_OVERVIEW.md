@@ -90,8 +90,9 @@ Sesi auth dashboard memakai Supabase client/storage key terpisah dari sesi app.
 Saat Supabase dikonfigurasi, role berasal dari tabel `dashboard_admins`; user
 app biasa tidak otomatis mendapat akses. Migrasi terkait:
 `supabase/migrations/20261011090000_dashboard_admin.sql`. Migrasi belum
-menyinkronkan seluruh skema Supabase app pengguna. Dashboard tetap memakai
-mode dummy sampai `VITE_DASHBOARD_USE_SUPABASE=true` di `.env`.
+menyinkronkan seluruh skema Supabase app pengguna. Mode dashboard dapat dipilih
+di halaman login admin; `VITE_DASHBOARD_USE_SUPABASE=true` di `.env` hanya
+menentukan mode awalnya.
 
 ---
 

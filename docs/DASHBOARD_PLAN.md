@@ -51,8 +51,9 @@ datanya tersedia. Route detail opsional mengikuti route induk, misalnya
 
 Layout dashboard terpisah dari frame ponsel. Sesi Supabase admin memakai
 storage key terpisah agar login dashboard tidak menggantikan sesi pengguna
-aplikasi. Mode default selalu dummy; mode Supabase dashboard hanya aktif setelah
-`VITE_DASHBOARD_USE_SUPABASE=true` dan konfigurasi URL/anon key tersedia.
+aplikasi. Pilihan mode dummy/Supabase tersedia di halaman login dashboard dan
+tersimpan terpisah dari mode app. `VITE_DASHBOARD_USE_SUPABASE=true` menjadikan
+Supabase mode awal; kedua kredensial Supabase harus tersedia untuk memilihnya.
 
 ## Menu navigasi
 
@@ -163,7 +164,8 @@ otorisasi server tetap wajib. Jangan menentukan role dari parameter URL,
 - Mode demo menggunakan `admin@kenalan.id` / `kenalan123`. Kredensial ini hanya
   untuk prototipe dan harus diganti/dinonaktifkan sebelum aplikasi publik.
 - Supabase app dapat tetap dikonfigurasi tetapi dashboard tetap menggunakan
-  data dummy sampai `VITE_DASHBOARD_USE_SUPABASE=true` di `.env`.
+  data dummy sampai mode Production dipilih di login dashboard; env
+  `VITE_DASHBOARD_USE_SUPABASE=true` menjadikannya mode awal.
 - Model lokasi frontend terbaru memakai label/koordinat stamp, sedangkan skema
   SQL awal masih memuat tabel `spots`. Menu **Lokasi Kampus** belum dimasukkan
   ke MVP; validasi kebutuhan sebelum implementasi.

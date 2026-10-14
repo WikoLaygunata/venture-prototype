@@ -34,8 +34,6 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim()
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey)
 export const isDashboardSupabaseRequested =
   import.meta.env.VITE_DASHBOARD_USE_SUPABASE?.trim().toLowerCase() === 'true'
-export const isDashboardSupabaseEnabled =
-  isSupabaseConfigured && isDashboardSupabaseRequested
 
 export const supabase = isSupabaseConfigured
   ? createClient(supabaseUrl, supabaseAnonKey, {
@@ -51,7 +49,7 @@ export const supabase = isSupabaseConfigured
  * Dashboard auth uses its own persisted session so signing into the admin
  * panel never replaces a member's app session (or vice versa).
  */
-export const dashboardSupabase = isDashboardSupabaseEnabled
+export const dashboardSupabase = isSupabaseConfigured
   ? createClient(supabaseUrl, supabaseAnonKey, {
       auth: {
         storageKey: 'kenalan.dashboard.auth',

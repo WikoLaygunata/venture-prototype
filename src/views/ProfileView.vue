@@ -69,7 +69,7 @@ import {
   updateColorCode,
 } from '@/lib/api'
 import { getColorCode } from '@/lib/colorCodes'
-import { isSupabaseConfigured } from '@/lib/supabase'
+import { isDemoMode } from '@/lib/dataMode'
 import { changePassword, currentProfile, currentUserId, setProfile, signOut } from '@/stores/auth'
 import { toast } from '@/stores/toast'
 
@@ -709,7 +709,7 @@ async function handleUnblock(user) {
           <!-- spacer so content clears the guest banner / bottom edge -->
           <div class="h-6" :class="mode === 'guest' ? 'pb-40' : ''" />
 
-          <div v-if="!isSupabaseConfigured" class="px-5 pb-6">
+          <div v-if="isDemoMode" class="px-5 pb-6">
             <p class="rounded-2xl bg-slate-100 px-4 py-3 text-[11px] leading-relaxed text-slate-400">
               Demo mode aktif — data profil ini berasal dari mock lokal.
             </p>

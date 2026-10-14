@@ -29,7 +29,7 @@ import {
 } from 'lucide-vue-next'
 
 import { fetchNfcToken } from '@/lib/api'
-import { isSupabaseConfigured } from '@/lib/supabase'
+import { isDemoMode } from '@/lib/dataMode'
 import { signUp } from '@/stores/auth'
 import { toast } from '@/stores/toast'
 
@@ -271,7 +271,7 @@ async function handleRegister() {
           </button>
         </form>
 
-        <div v-if="!isSupabaseConfigured" class="rounded-2xl bg-slate-50 p-4">
+        <div v-if="isDemoMode" class="rounded-2xl bg-slate-50 p-4">
           <p class="text-[11px] font-bold uppercase tracking-wide text-slate-400">
             Demo mode — token siap pakai
           </p>

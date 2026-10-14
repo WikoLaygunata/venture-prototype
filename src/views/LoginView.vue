@@ -17,6 +17,7 @@ import {
 } from 'lucide-vue-next'
 
 import { isSupabaseConfigured } from '@/lib/supabase'
+import { dataMode, setDataMode } from '@/lib/dataMode'
 import { getDemoEmail, getDemoPassword } from '@/lib/mockData'
 import { claimPendingToken } from '@/lib/pendingToken'
 import { signIn } from '@/stores/auth'
@@ -27,6 +28,7 @@ const router = useRouter()
 
 const submitting = ref(false)
 const errorMessage = ref('')
+const modeError = ref('')
 
 const form = reactive({
   email: '',
@@ -44,6 +46,17 @@ const canSubmit = computed(() => {
   const base = /\S+@\S+\.\S+/.test(form.email) && form.password.length >= 6
   return base && !submitting.value
 })
+
+function changeMode(mode) {
+  if (mode === dataMode.value) return
+  modeError.value = ''
+  try {
+    setDataMode(mode)
+    window.location.reload()
+  } catch (error) {
+    modeError.value = error.message
+  }
+}
 
 async function handleSubmit() {
   if (!canSubmit.value) return
@@ -96,6 +109,50 @@ async function fillDemo() {
           Masuk buat lanjut mutualan dan lihat stamp di sekitarmu.
         </p>
       </div>
+
+      <section class="mb-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+        <h2 class="text-xs font-extrabold text-slate-800">Pilih mode aplikasi</h2>
+        <div class="mt-3 grid grid-cols-2 gap-2" role="radiogroup" aria-label="Mode aplikasi">
+          <button
+            type="button"
+            role="radio"
+            :aria-checked="dataMode === 'demo'"
+            class="rounded-xl border px-3 py-2.5 text-left transition"
+            :class="dataMode === 'demo'
+              ? 'border-kenalan-500 bg-white text-kenalan-700 shadow-sm'
+              : 'border-transparent bg-white/60 text-slate-500'"
+            @click="changeMode('demo')"
+          >
+            <span class="block text-xs font-bold">Demo</span>
+            <span class="mt-0.5 block text-[10px]">Data dummy lokal</span>
+          </button>
+          <button
+            type="button"
+            role="radio"
+            :aria-checked="dataMode === 'production'"
+            :disabled="!isSupabaseConfigured"
+            class="rounded-xl border px-3 py-2.5 text-left transition"
+            :class="dataMode === 'production'
+              ? 'border-kenalan-500 bg-white text-kenalan-700 shadow-sm'
+              : 'border-transparent bg-white/60 text-slate-500'"
+            @click="changeMode('production')"
+          >
+            <span class="block text-xs font-bold">Production</span>
+            <span class="mt-0.5 block text-[10px]">API Supabase</span>
+          </button>
+        </div>
+        <p class="mt-2 text-[11px] leading-relaxed text-slate-500">
+          {{ dataMode === 'demo'
+            ? 'Menggunakan data dummy yang tersimpan di browser ini.'
+            : 'Semua data aplikasi menggunakan API Supabase.' }}
+        </p>
+        <p v-if="!isSupabaseConfigured" class="mt-2 text-[11px] leading-relaxed text-amber-700">
+          Mode production tersedia setelah VITE_SUPABASE_URL dan VITE_SUPABASE_ANON_KEY dikonfigurasi.
+        </p>
+        <p v-if="modeError" role="alert" class="mt-2 text-xs font-semibold text-blush-deep">
+          {{ modeError }}
+        </p>
+      </section>
 
       <!-- Context banner when arriving from a profile they wanted to connect with -->
       <div
@@ -169,7 +226,7 @@ async function fillDemo() {
         </RouterLink>
 
         <!-- Demo mode helper -->
-        <div v-if="!isSupabaseConfigured" class="mt-5 rounded-2xl bg-slate-50 p-4">
+        <div v-if="dataMode === 'demo'" class="mt-5 rounded-2xl bg-slate-50 p-4">
           <p class="text-[11px] font-bold uppercase tracking-wide text-slate-400">Demo mode</p>
           <p class="mt-1.5 text-xs leading-relaxed text-slate-500">
             Belum ada Supabase yang terhubung, jadi data dilayani dari mock lokal. Pakai
